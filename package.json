@@ -1,0 +1,19 @@
+{
+  "name": "planque",
+  "version": "1.0.0",
+  "description": "Planque — coffre-fort chiffré pour iPhone, avec Noisette",
+  "scripts": {
+    "sync": "cap sync ios",
+    "ios": "cap open ios",
+    "preview": "npx serve www"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/ios": "^8.6.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.2"
+  },
+  "private": true
+}

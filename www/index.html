@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="format-detection" content="telephone=no">
+  <title>Planque</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div class="ambient"></div>
+  <main id="app">
+
+    <!-- 1. Bienvenue -->
+    <section class="screen" id="intro">
+      <div class="center">
+        <div class="intro-mascot" data-noisette="sleep" data-size="210"></div>
+        <div class="brand">Planque</div>
+        <h1>Tes photos,<br>bien planquées.</h1>
+        <p class="lead">Photos, vidéos et documents chiffrés sur ton iPhone.</p>
+        <div class="pill-row">
+          <span class="pill">Sans compte</span>
+          <span class="pill">Sans serveur</span>
+          <span class="pill">AES-256</span>
+        </div>
+      </div>
+      <button class="btn" data-go="how">Réveiller Noisette</button>
+    </section>
+
+    <!-- 2. Comment ça marche -->
+    <section class="screen" id="how">
+      <div class="center" style="justify-content:flex-start;padding-top:8px">
+        <div data-noisette="awake" data-size="110"></div>
+        <h2>Trois choses à savoir</h2>
+        <div class="how-list">
+          <div class="how">
+            <div class="how-ico" data-icon="key"></div>
+            <div><h3>Ton schéma est ta clé</h3><p>Il sert à chiffrer tes fichiers. Planque ne le garde nulle part.</p></div>
+          </div>
+          <div class="how">
+            <div class="how-ico" data-icon="mask"></div>
+            <div><h3>Chaque schéma ouvre son coffre</h3><p>Un autre schéma n’affiche pas d’erreur : il ouvre un autre coffre. Idéal pour un coffre leurre.</p></div>
+          </div>
+          <div class="how">
+            <div class="how-ico" data-icon="shield"></div>
+            <div><h3>Personne ne peut le retrouver</h3><p>Si tu oublies ton schéma, tes fichiers restent illisibles. Pour tout le monde, nous compris.</p></div>
+          </div>
+        </div>
+      </div>
+      <button class="btn" data-go="create">Créer mon schéma</button>
+    </section>
+
+    <!-- 3. Création du schéma -->
+    <section class="screen" id="create">
+      <div class="center">
+        <div class="lock-mascot" data-noisette="awake" data-size="120" id="create-mascot"></div>
+        <h2 id="create-title">Dessine ton schéma</h2>
+        <p class="sub" id="create-sub">Relie au moins 4 points. Plus il est long, plus il est solide.</p>
+        <div id="create-pad"></div>
+        <div class="hint" id="create-hint"></div>
+      </div>
+    </section>
+
+    <!-- Verrouillage -->
+    <section class="screen" id="lock">
+      <div class="center">
+        <div class="lock-mascot" data-noisette="sleep" data-size="132" id="lock-mascot"></div>
+        <div class="lock-head">
+          <div class="brand">Planque</div>
+          <p class="sub" style="margin-top:6px">Dessine ton schéma</p>
+        </div>
+        <div id="lock-pad"></div>
+        <div class="hint" id="lock-hint"></div>
+      </div>
+    </section>
+
+    <!-- Clé introuvable -->
+    <section class="screen" id="problem">
+      <div class="center">
+        <div data-noisette="sleep" data-size="140"></div>
+        <h2>La clé de cet iPhone est introuvable</h2>
+        <p class="sub">Tes coffres sont toujours là, mais une partie de leur clé est rangée dans le trousseau iCloud. Vérifie que « Mots de passe et trousseau » est activé dans Réglages › ton nom › iCloud, attends quelques minutes, puis réessaie.</p>
+      </div>
+      <button class="btn" id="retry">Réessayer</button>
+    </section>
+
+    <!-- Coffre -->
+    <section class="screen" id="vault">
+      <div class="gallery-scroll" id="scroll">
+        <div class="grid" id="grid"></div>
+      </div>
+      <div class="empty" id="empty">
+        <div data-noisette="awake" data-size="150" id="empty-mascot"></div>
+        <h2 style="margin-top:6px">Ta planque est vide</h2>
+        <p class="sub">Donne-moi tes photos, vidéos ou documents : je les chiffre et je les cache ici.</p>
+      </div>
+      <header class="vault-top">
+        <div class="vault-title">
+          <h2>Ma planque</h2>
+          <div class="count" id="count"></div>
+        </div>
+        <button class="text-btn" id="select-btn">Choisir</button>
+        <button class="icon-btn" id="settings-btn" aria-label="Réglages" data-icon="sliders"></button>
+        <button class="icon-btn" id="lock-btn" aria-label="Verrouiller" data-icon="lock"></button>
+      </header>
+      <button class="fab" id="fab"><span data-icon="plus"></span>Planquer</button>
+      <div class="selbar">
+        <button class="btn ghost" id="sel-share"><span data-icon="share"></span><span>Partager</span></button>
+        <button class="btn danger" id="sel-delete"><span data-icon="trash"></span><span>Supprimer</span></button>
+      </div>
+    </section>
+  </main>
+
+  <!-- Visionneuse photo -->
+  <div class="viewer" id="viewer">
+    <div class="stage" id="stage"><div class="spinner" id="viewer-spin"></div><img id="viewer-img" alt=""></div>
+    <div class="bar top">
+      <button class="icon-btn" id="viewer-close" aria-label="Fermer" data-icon="x"></button>
+      <div class="meta" id="viewer-meta"></div>
+      <div style="width:42px"></div>
+    </div>
+    <div class="bar bottom">
+      <button class="icon-btn" id="viewer-share" aria-label="Partager" data-icon="share"></button>
+      <button class="icon-btn" id="viewer-delete" aria-label="Supprimer" data-icon="trash"></button>
+    </div>
+  </div>
+
+  <!-- Import en cours -->
+  <div class="busy-overlay" id="busy">
+    <div data-noisette="stash" data-size="150"></div>
+    <p class="lead" id="busy-text">Je planque…</p>
+    <div class="progress"><i id="busy-bar"></i></div>
+  </div>
+
+  <div class="scrim" id="scrim"></div>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true"><div class="grab"></div><div id="sheet-body"></div></div>
+  <div class="toast" id="toast"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

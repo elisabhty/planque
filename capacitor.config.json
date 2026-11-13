@@ -1,0 +1,11 @@
+{
+  "appId": "com.hormend.planque",
+  "appName": "Planque",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#0E1311",
+    "scrollEnabled": false,
+    "allowsLinkPreview": false
+  }
+}
