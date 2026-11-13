@@ -12,30 +12,39 @@ import AVKit
 import QuickLook
 import ImageIO
 import PDFKit
+import LocalAuthentication
 
 // =====================================================================
 //  Planque — coffre chiffré local
 //
-//  Schéma dessiné ──PBKDF2-SHA256 (600 000 tours, poivre du trousseau)──▶ 64 octets
+//  Secret = suite de cachettes touchées dans la forêt (36 cachettes, 5 à 16 noisettes).
+//
+//  cachettes ──PBKDF2-SHA256 (600 000 tours, sel de l'appareil)──▶ pre (32 o)
+//  pre ──SHA-256──▶ clé P-256 éphémère ──ECDH avec la clé de la PUCE DE SÉCURITÉ──▶ secret partagé
+//  secret partagé ──HKDF-SHA256 (sel = pre)──▶ 64 octets
 //     ├─ 32 premiers : clé d'enveloppe (KEK)
-//     └─ 32 suivants : localisateur ─SHA256─▶ nom du dossier du coffre
-//  Clé maîtresse aléatoire (256 bits), enveloppée par la KEK (AES-256-GCM)
-//  Chaque fichier : AES-256-GCM par blocs de 1 Mo, avec n° de bloc et
-//  drapeau « dernier bloc » authentifiés (aucune troncature ni permutation).
-//  Index (noms, dates, tailles) et miniatures : chiffrés eux aussi.
-//  Un schéma inconnu ouvre un coffre vide : jamais de message d'erreur.
+//     └─ 32 suivants : localisateur ─SHA-256─▶ nom du dossier du coffre
+//  → chaque essai exige la puce de CET iPhone : impossible de tester des cachettes ailleurs.
+//
+//  Clé maîtresse aléatoire (256 bits) par coffre, enveloppée deux fois :
+//     • par la KEK des cachettes (key.bin)
+//     • par la phrase de récupération de 12 mots, 128 bits (rec.bin) → nouvel iPhone, cachettes oubliées
+//  Fichiers : AES-256-GCM par blocs de 1 Mo, n° de bloc et « dernier bloc » authentifiés.
+//  Index (noms, dates, tailles) et miniatures : chiffrés aussi.
+//  Des cachettes inconnues ouvrent un coffre vide : jamais de message d'erreur.
 // =====================================================================
 
 // MARK: - Constantes
 
 private enum K {
-    static let gridSize = 5
-    static let minPoints = 4
+    static let spots = 36
+    static let minNuts = 5
+    static let maxNuts = 16
     static let iterations: UInt32 = 600_000
     static let chunk = 1 << 20
     static let magic: [UInt8] = Array("PLQ1".utf8)
     static let service = "com.hormend.planque"
-    static let pepperAccount = "device-pepper-v1"
+    static let deviceKeyAccount = "device-key-v2"
     static let thumbMax: CGFloat = 420
     static let viewMax: CGFloat = 2560
 }
@@ -57,7 +66,7 @@ enum VaultError: LocalizedError {
         case .locked: return "Le coffre est verrouillé."
         case .notCreated: return "Ce coffre n’est pas encore créé."
         case .keyMissing: return "La clé de cet iPhone est introuvable."
-        case .badPattern: return "Relie au moins 4 points."
+        case .badPattern: return "Cache au moins 5 noisettes."
         case .notFound: return "Fichier introuvable."
         case .corrupted: return "Ce fichier est illisible."
         case .unavailable(let m): return m
@@ -115,52 +124,109 @@ private func fileSize(_ url: URL) throws -> Int {
 
 private extension Data {
     var hex: String { map { String(format: "%02x", $0) }.joined() }
+
+    init?(hex: String) {
+        guard hex.count % 2 == 0 else { return nil }
+        var d = Data(capacity: hex.count / 2)
+        var i = hex.startIndex
+        while i < hex.endIndex {
+            let j = hex.index(i, offsetBy: 2)
+            guard let b = UInt8(hex[i..<j], radix: 16) else { return nil }
+            d.append(b)
+            i = j
+        }
+        self = d
+    }
 }
 
-// MARK: - Poivre de l'appareil (trousseau iOS)
+// MARK: - Clé de l'appareil (puce de sécurité)
 //
-//  Mélangé au schéma : sans lui, une copie des fichiers du coffre ne permet pas
-//  de tester des schémas hors de l'iPhone. Synchronisé par le trousseau iCloud
-//  (chiffré de bout en bout) pour suivre l'utilisateur sur un nouvel iPhone.
+//  Clé P-256 créée DANS la Secure Enclave : elle ne peut jamais en sortir, ni être sauvegardée,
+//  ni être copiée sur un autre appareil. Le trousseau ne garde qu'une référence chiffrée
+//  utilisable uniquement par la puce de cet iPhone.
 
-private enum Pepper {
-    static func base() -> [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword,
-         kSecAttrService as String: K.service,
-         kSecAttrAccount as String: K.pepperAccount]
+private enum DeviceKey {
+    case enclave(SecureEnclave.P256.KeyAgreement.PrivateKey)
+    case software(P256.KeyAgreement.PrivateKey) // Simulateur uniquement (pas de puce)
+
+    var publicKey: P256.KeyAgreement.PublicKey {
+        switch self {
+        case .enclave(let k): return k.publicKey
+        case .software(let k): return k.publicKey
+        }
     }
 
-    static func load() -> Data? {
-        var q = base()
-        q[kSecAttrSynchronizable as String] = kSecAttrSynchronizableAny
+    func agree(with pub: P256.KeyAgreement.PublicKey) throws -> SharedSecret {
+        switch self {
+        case .enclave(let k): return try k.sharedSecretFromKeyAgreement(with: pub)
+        case .software(let k): return try k.sharedSecretFromKeyAgreement(with: pub)
+        }
+    }
+
+    var fingerprint: String { Data(SHA256.hash(data: publicKey.rawRepresentation)).prefix(8).hex }
+
+    static func query() -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: K.service,
+         kSecAttrAccount as String: K.deviceKeyAccount]
+    }
+
+    static func load() -> DeviceKey? {
+        var q = query()
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
         var out: CFTypeRef?
         guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess,
-              let d = out as? Data, d.count == 32 else { return nil }
-        return d
+              let d = out as? Data, d.count > 1 else { return nil }
+        let body = Data(d.dropFirst())
+        switch d[d.startIndex] {
+        case 1: return (try? SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: body)).map { .enclave($0) }
+        case 2: return (try? P256.KeyAgreement.PrivateKey(rawRepresentation: body)).map { .software($0) }
+        default: return nil
+        }
     }
 
-    static func create() throws -> Data {
-        let d = try randomBytes(32)
-        var q = base()
-        q[kSecValueData as String] = d
-        q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        q[kSecAttrSynchronizable as String] = kCFBooleanTrue
+    static func create() throws -> DeviceKey {
+        SecItemDelete(query() as CFDictionary)
+        let key: DeviceKey
+        var blob: Data
+        if SecureEnclave.isAvailable {
+            guard let access = SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+                                                               .privateKeyUsage, nil) else {
+                throw VaultError.io("Puce de sécurité indisponible.")
+            }
+            let k = try SecureEnclave.P256.KeyAgreement.PrivateKey(accessControl: access)
+            key = .enclave(k)
+            blob = Data([1])
+            blob.append(k.dataRepresentation)
+        } else {
+            let k = P256.KeyAgreement.PrivateKey()
+            key = .software(k)
+            blob = Data([2])
+            blob.append(k.rawRepresentation)
+        }
+        var q = query()
+        q[kSecValueData as String] = blob
+        q[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         let st = SecItemAdd(q as CFDictionary, nil)
         guard st == errSecSuccess else { throw VaultError.io("Trousseau indisponible (\(st)).") }
-        return d
-    }
-
-    /// Empreinte non secrète pour vérifier qu'on a bien le même poivre qu'à la création.
-    static func check(_ p: Data) -> String {
-        Data(SHA256.hash(data: p + Data("plq-check".utf8))).prefix(8).hex
+        return key
     }
 }
 
 private struct Meta: Codable {
     var v: Int
-    var pepperCheck: String
+    var salt: String
+    var device: String
+}
+
+private func readMeta() -> Meta? {
+    (try? Data(contentsOf: Paths.meta)).flatMap { try? JSONDecoder().decode(Meta.self, from: $0) }
+}
+
+private func writeMeta(_ m: Meta) throws {
+    try Paths.ensure(Paths.root)
+    try writeProtected(try JSONEncoder().encode(m), to: Paths.meta)
 }
 
 // MARK: - Dérivation de clé
@@ -170,23 +236,53 @@ private struct Derived {
     let vaultId: String
 }
 
-private func derive(_ pattern: [Int], pepper: Data) throws -> Derived {
-    let password = "plq1|\(K.gridSize)x\(K.gridSize)|" + pattern.map(String.init).joined(separator: "-")
+private func derive(_ nuts: [Int], salt: Data, device: DeviceKey) throws -> Derived {
+    let password = "plq2|foret36|" + nuts.map(String.init).joined(separator: "-")
     let pwLen = password.utf8.count
-    var out = [UInt8](repeating: 0, count: 64)
-    let rc = pepper.withUnsafeBytes { (salt: UnsafeRawBufferPointer) -> Int32 in
+    var pre = [UInt8](repeating: 0, count: 32)
+    let rc = salt.withUnsafeBytes { (s: UnsafeRawBufferPointer) -> Int32 in
         CCKeyDerivationPBKDF(CCPBKDFAlgorithm(kCCPBKDF2),
                              password, pwLen,
-                             salt.bindMemory(to: UInt8.self).baseAddress, salt.count,
+                             s.bindMemory(to: UInt8.self).baseAddress, s.count,
                              CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256),
                              K.iterations,
-                             &out, out.count)
+                             &pre, pre.count)
     }
-    defer { for i in out.indices { out[i] = 0 } }
+    defer { for i in pre.indices { pre[i] = 0 } }
     guard rc == Int32(kCCSuccess) else { throw VaultError.io("Dérivation de clé impossible.") }
-    let kek = SymmetricKey(data: Data(out[0..<32]))
-    let vaultId = Data(SHA256.hash(data: Data(out[32..<64]))).prefix(16).hex
-    return Derived(kek: kek, vaultId: vaultId)
+    let preData = Data(pre)
+
+    // Clé éphémère tirée de l'essai, puis accord ECDH avec la clé de la puce :
+    // chaque essai doit passer par la Secure Enclave de cet iPhone.
+    var seed = Data(SHA256.hash(data: Data("plq-se|".utf8) + preData))
+    var ephemeral: P256.KeyAgreement.PrivateKey?
+    for _ in 0..<16 {
+        if let k = try? P256.KeyAgreement.PrivateKey(rawRepresentation: seed) { ephemeral = k; break }
+        seed = Data(SHA256.hash(data: seed))
+    }
+    guard let eph = ephemeral else { throw VaultError.io("Dérivation de clé impossible.") }
+    let shared = try device.agree(with: eph.publicKey)
+    let okm = shared.hkdfDerivedSymmetricKey(using: SHA256.self, salt: preData,
+                                             sharedInfo: Data("plq2-keys".utf8), outputByteCount: 64)
+    let bytes = okm.withUnsafeBytes { Data($0) }
+    return Derived(kek: SymmetricKey(data: bytes.prefix(32)),
+                   vaultId: Data(SHA256.hash(data: bytes.suffix(32))).prefix(16).hex)
+}
+
+// MARK: - Phrase de récupération (128 bits, indépendante de l'appareil)
+
+private struct RecoveryKeys {
+    let kek: SymmetricKey
+    let rid: String
+}
+
+private func recoveryKeys(_ entropy: Data) -> RecoveryKeys {
+    let okm = HKDF<SHA256>.deriveKey(inputKeyMaterial: SymmetricKey(data: entropy),
+                                     salt: Data("plq-recovery".utf8),
+                                     info: Data("plq2-rec".utf8), outputByteCount: 64)
+    let b = okm.withUnsafeBytes { Data($0) }
+    return RecoveryKeys(kek: SymmetricKey(data: b.prefix(32)),
+                        rid: Data(SHA256.hash(data: b.suffix(32))).prefix(16).hex)
 }
 
 // MARK: - Chiffrement des petits blocs (clé enveloppée, index)
@@ -363,10 +459,14 @@ private final class VaultSession {
     func saveIndex() throws {
         guard persisted else { return }
         let json = try JSONEncoder().encode(index)
-        try writeProtected(try Small.seal(json, key: master, aad: "plq-index|\(vaultId)"), to: indexFile)
+        try writeProtected(try Small.seal(json, key: master, aad: "plq-index"), to: indexFile)
     }
 
-    func persist() throws {
+    var recFile: URL { dir.appendingPathComponent("rec.bin") }
+    var ridFile: URL { dir.appendingPathComponent("rid") }
+
+    /// Crée le coffre sur le disque. Renvoie l'entropie de la phrase de récupération (montrée une seule fois).
+    func persist() throws -> Data {
         guard !FileManager.default.fileExists(atPath: dir.path) else { throw VaultError.io("Ce coffre existe déjà.") }
         try Paths.ensure(blobs)
         try Paths.ensure(thumbs)
@@ -374,6 +474,17 @@ private final class VaultSession {
         try writeProtected(try Small.seal(raw, key: kek, aad: "plq-key|\(vaultId)"), to: keyFile)
         persisted = true
         try saveIndex()
+        return try writeRecovery()
+    }
+
+    /// (Re)génère la phrase de récupération de ce coffre.
+    func writeRecovery() throws -> Data {
+        let entropy = try randomBytes(16)
+        let rk = recoveryKeys(entropy)
+        let raw = master.withUnsafeBytes { Data($0) }
+        try writeProtected(try Small.seal(raw, key: rk.kek, aad: "plq-rec"), to: recFile)
+        try writeProtected(Data(rk.rid.utf8), to: ridFile)
+        return entropy
     }
 
     /// Ouvre le coffre lié au schéma, ou prépare un coffre vide (non écrit) s'il n'existe pas.
@@ -387,7 +498,7 @@ private final class VaultSession {
         let master = SymmetricKey(data: raw)
         var index = VaultIndex()
         if let enc = try? Data(contentsOf: probe.indexFile),
-           let json = try? Small.open(enc, key: master, aad: "plq-index|\(d.vaultId)"),
+           let json = try? Small.open(enc, key: master, aad: "plq-index"),
            let decoded = try? JSONDecoder().decode(VaultIndex.self, from: json) {
             index = decoded
         }
@@ -611,13 +722,19 @@ public class VaultPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "share", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "remove", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setSetting", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "destroy", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "destroy", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "recoverStart", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "recoverFinish", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "newRecovery", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "biometry", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "authenticate", returnType: CAPPluginReturnPromise)
     ]
 
     /// Toute la cryptographie et l'état du coffre passent par cette file série.
     private let q = DispatchQueue(label: "com.hormend.planque.vault", qos: .userInitiated)
     private var session: VaultSession?          // file q uniquement
     private var lastAssetIds: [String] = []     // file q uniquement
+    private var pendingRecovery: (dir: URL, master: SymmetricKey)? // file q uniquement
 
     // Fil principal uniquement
     private var cover: UIView?
@@ -678,16 +795,16 @@ public class VaultPlugin: CAPPlugin, CAPBridgedPlugin {
         return s
     }
 
-    private func pattern(_ call: CAPPluginCall) throws -> [Int] {
-        let raw = call.getArray("pattern") ?? []
+    private func nuts(_ call: CAPPluginCall) throws -> [Int] {
+        let raw = call.getArray("nuts") ?? []
         let pts = raw.compactMap { v -> Int? in
             if let n = v as? NSNumber { return n.intValue }
             if let i = v as? Int { return i }
             return nil
         }
-        let cells = 0..<(K.gridSize * K.gridSize)
-        guard pts.count >= K.minPoints, pts.count == raw.count,
-              Set(pts).count == pts.count, pts.allSatisfy({ cells.contains($0) }) else {
+        let spots = 0..<K.spots
+        guard pts.count >= K.minNuts, pts.count <= K.maxNuts, pts.count == raw.count,
+              pts.allSatisfy({ spots.contains($0) }) else {
             throw VaultError.badPattern
         }
         return pts
@@ -697,21 +814,27 @@ public class VaultPlugin: CAPPlugin, CAPBridgedPlugin {
         (call.getArray("ids") ?? []).compactMap { $0 as? String }
     }
 
-    private func devicePepper(create: Bool) throws -> Data {
-        let meta = (try? Data(contentsOf: Paths.meta)).flatMap { try? JSONDecoder().decode(Meta.self, from: $0) }
-        if let p = Pepper.load() {
-            if let m = meta, m.pepperCheck != Pepper.check(p) { throw VaultError.keyMissing }
-            if meta == nil {
-                try Paths.ensure(Paths.root)
-                try writeProtected(try JSONEncoder().encode(Meta(v: 1, pepperCheck: Pepper.check(p))), to: Paths.meta)
+    /// Clé de la puce + sel de l'appareil.
+    /// - create : premier lancement, on peut créer la clé.
+    /// - reset : récupération sur un nouvel iPhone, on remplace une clé absente ou différente.
+    private func deviceContext(create: Bool, reset: Bool = false) throws -> (DeviceKey, Data) {
+        let meta = readMeta()
+        if !reset, let key = DeviceKey.load() {
+            if let m = meta {
+                guard m.device == key.fingerprint, let salt = Data(hex: m.salt) else { throw VaultError.keyMissing }
+                return (key, salt)
             }
-            return p
+            let salt = try randomBytes(16)
+            try writeMeta(Meta(v: 2, salt: salt.hex, device: key.fingerprint))
+            return (key, salt)
         }
-        if meta != nil || !create { throw VaultError.keyMissing }
-        let p = try Pepper.create()
-        try Paths.ensure(Paths.root)
-        try writeProtected(try JSONEncoder().encode(Meta(v: 1, pepperCheck: Pepper.check(p))), to: Paths.meta)
-        return p
+        if meta != nil && !reset { throw VaultError.keyMissing }
+        guard create || reset else { throw VaultError.keyMissing }
+        let key = try DeviceKey.create()
+        let salt: Data
+        if let m = meta, let old = Data(hex: m.salt) { salt = old } else { salt = try randomBytes(16) }
+        try writeMeta(Meta(v: 2, salt: salt.hex, device: key.fingerprint))
+        return (key, salt)
     }
 
     private func snapshot(_ s: VaultSession) -> JSObject {
@@ -726,6 +849,7 @@ public class VaultPlugin: CAPPlugin, CAPBridgedPlugin {
     private func wipeSession() {
         session = nil
         lastAssetIds = []
+        pendingRecovery = nil
         try? FileManager.default.removeItem(at: Paths.scratch)
     }
 
@@ -769,40 +893,130 @@ public class VaultPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func status(_ call: CAPPluginCall) {
         run(call) {
+            let enclave = SecureEnclave.isAvailable
             do {
-                _ = try self.devicePepper(create: false)
-                return ["ready": true, "problem": NSNull()]
+                _ = try self.deviceContext(create: false)
+                return ["ready": true, "problem": NSNull(), "enclave": enclave]
             } catch VaultError.keyMissing {
                 let hasMeta = FileManager.default.fileExists(atPath: Paths.meta.path)
-                if hasMeta { return ["ready": false, "problem": "keyMissing"] }
-                return ["ready": true, "problem": NSNull()]
+                if hasMeta { return ["ready": false, "problem": "keyMissing", "enclave": enclave] }
+                return ["ready": true, "problem": NSNull(), "enclave": enclave]
             }
         }
     }
 
     @objc func unlock(_ call: CAPPluginCall) {
-        let pts: [Int]
-        do { pts = try pattern(call) } catch { fail(call, error); return }
+        let secret: [Int]
+        do { secret = try nuts(call) } catch { fail(call, error); return }
         run(call) {
             self.wipeSession()
-            let pepper = try self.devicePepper(create: true)
-            let s = VaultSession.open(try derive(pts, pepper: pepper))
+            let (device, salt) = try self.deviceContext(create: true)
+            let s = VaultSession.open(try derive(secret, salt: salt, device: device))
             self.session = s
             return self.snapshot(s)
         }
     }
 
-    /// Crée réellement le coffre vide ouvert, après une deuxième saisie du même schéma.
+    /// Crée réellement le coffre vide ouvert, après une deuxième saisie des mêmes cachettes.
+    /// Renvoie l'entropie de la phrase de récupération, à montrer une seule fois.
     @objc func confirmNew(_ call: CAPPluginCall) {
-        let pts: [Int]
-        do { pts = try pattern(call) } catch { call.resolve(["ok": false]); return }
+        let secret: [Int]
+        do { secret = try nuts(call) } catch { call.resolve(["ok": false]); return }
         run(call) {
             let s = try self.requireSession()
             if s.persisted { return ["ok": true] }
-            let d = try derive(pts, pepper: try self.devicePepper(create: false))
+            let (device, salt) = try self.deviceContext(create: false)
+            let d = try derive(secret, salt: salt, device: device)
             guard d.vaultId == s.vaultId else { return ["ok": false] }
-            try s.persist()
-            return ["ok": true]
+            let entropy = try s.persist()
+            return ["ok": true, "recovery": entropy.hex]
+        }
+    }
+
+    // MARK: Récupération
+
+    /// Cherche le coffre de cet iPhone qui correspond à la phrase (entropie en hexadécimal).
+    @objc func recoverStart(_ call: CAPPluginCall) {
+        guard let hex = call.getString("entropy"), let entropy = Data(hex: hex), entropy.count == 16 else {
+            call.resolve(["found": false])
+            return
+        }
+        run(call) {
+            self.wipeSession()
+            let rk = recoveryKeys(entropy)
+            let dirs = (try? FileManager.default.contentsOfDirectory(at: Paths.vaults, includingPropertiesForKeys: nil)) ?? []
+            for dir in dirs {
+                guard let rid = try? Data(contentsOf: dir.appendingPathComponent("rid")),
+                      String(decoding: rid, as: UTF8.self) == rk.rid,
+                      let enc = try? Data(contentsOf: dir.appendingPathComponent("rec.bin")),
+                      let raw = try? Small.open(enc, key: rk.kek, aad: "plq-rec") else { continue }
+                self.pendingRecovery = (dir, SymmetricKey(data: raw))
+                return ["found": true]
+            }
+            return ["found": false]
+        }
+    }
+
+    /// Associe de nouvelles cachettes au coffre retrouvé (et une nouvelle clé de puce sur un nouvel iPhone).
+    @objc func recoverFinish(_ call: CAPPluginCall) {
+        let secret: [Int]
+        do { secret = try nuts(call) } catch { fail(call, error); return }
+        run(call) {
+            guard let pending = self.pendingRecovery else { throw VaultError.locked }
+            let keyOK = (try? self.deviceContext(create: false)) != nil
+            let (device, salt) = try self.deviceContext(create: true, reset: !keyOK)
+            let d = try derive(secret, salt: salt, device: device)
+            let fm = FileManager.default
+            let target = Paths.vaults.appendingPathComponent(d.vaultId, isDirectory: true)
+            let same = target.standardizedFileURL.path == pending.dir.standardizedFileURL.path
+            if !same && fm.fileExists(atPath: target.path) {
+                throw VaultError.io("Ces cachettes ouvrent déjà un autre coffre. Choisis-en d’autres.")
+            }
+            let raw = pending.master.withUnsafeBytes { Data($0) }
+            try writeProtected(try Small.seal(raw, key: d.kek, aad: "plq-key|\(d.vaultId)"),
+                               to: pending.dir.appendingPathComponent("key.bin"))
+            if !same { try fm.moveItem(at: pending.dir, to: target) }
+            self.pendingRecovery = nil
+            let s = VaultSession.open(d)
+            guard s.persisted else { throw VaultError.corrupted }
+            self.session = s
+            return self.snapshot(s)
+        }
+    }
+
+    /// Remplace la phrase de récupération du coffre ouvert (l'ancienne ne marche plus).
+    @objc func newRecovery(_ call: CAPPluginCall) {
+        run(call) {
+            let s = try self.requirePersisted()
+            return ["recovery": try s.writeRecovery().hex]
+        }
+    }
+
+    // MARK: Face ID (verrou d'accès optionnel, en plus des cachettes)
+
+    @objc func biometry(_ call: CAPPluginCall) {
+        let ctx = LAContext()
+        var err: NSError?
+        let ok = ctx.canEvaluatePolicy(.deviceOwnerAuthentication, error: &err)
+        let kind: String
+        switch ctx.biometryType {
+        case .faceID: kind = "faceID"
+        case .touchID: kind = "touchID"
+        default: kind = "none"
+        }
+        call.resolve(["available": ok, "type": kind])
+    }
+
+    @objc func authenticate(_ call: CAPPluginCall) {
+        let ctx = LAContext()
+        ctx.localizedCancelTitle = "Annuler"
+        var err: NSError?
+        guard ctx.canEvaluatePolicy(.deviceOwnerAuthentication, error: &err) else {
+            call.resolve(["ok": true, "available": false])
+            return
+        }
+        ctx.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Ouvrir Planque") { ok, _ in
+            call.resolve(["ok": ok, "available": true])
         }
     }
 

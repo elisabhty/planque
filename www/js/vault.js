@@ -5,7 +5,8 @@ const C = window.Capacitor;
 export const isNative = !!(C && typeof C.isNativePlatform === 'function' && C.isNativePlatform() && C.nativePromise);
 
 const METHODS = ['status', 'unlock', 'confirmNew', 'lock', 'uncover', 'thumbs', 'photo', 'openItem',
-  'importPhotos', 'importCamera', 'importFiles', 'deleteOriginals', 'share', 'remove', 'setSetting', 'destroy'];
+  'importPhotos', 'importCamera', 'importFiles', 'deleteOriginals', 'share', 'remove', 'setSetting', 'destroy',
+  'recoverStart', 'recoverFinish', 'newRecovery', 'biometry', 'authenticate'];
 
 function nativeVault() {
   const api = {};

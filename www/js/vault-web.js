@@ -1,6 +1,7 @@
 // Simulation du coffre pour l'aperçu dans un navigateur (développement uniquement).
-// Même logique que le plugin iOS : PBKDF2 → clé d'enveloppe + localisateur, clé maîtresse
-// aléatoire, AES-256-GCM, index et miniatures chiffrés, coffre vide si schéma inconnu.
+// Même logique que le plugin iOS : PBKDF2 → mélange avec la clé de l'appareil (simulée ici par
+// un secret aléatoire, sur iPhone c'est la puce de sécurité) → HKDF → clé d'enveloppe + localisateur,
+// clé maîtresse aléatoire, phrase de récupération, AES-256-GCM, coffre vide si cachettes inconnues.
 // Stockage : IndexedDB du navigateur. Sur iPhone, c'est le plugin Swift qui fait tout.
 
 const DB = 'planque-sim';
@@ -28,6 +29,13 @@ async function kv(mode, fn) {
 const get = (k) => kv('readonly', (s) => s.get(k));
 const put = (k, v) => kv('readwrite', (s) => s.put(v, k));
 const del = (k) => kv('readwrite', (s) => s.delete(k));
+async function keysWithPrefix(prefix) {
+  const db = await idb();
+  return new Promise((resolve) => {
+    const q = db.transaction('kv').objectStore('kv').getAllKeys(IDBKeyRange.bound(prefix, prefix + '\uffff'));
+    q.onsuccess = () => resolve(q.result);
+  });
+}
 async function delPrefix(prefix) {
   const db = await idb();
   return new Promise((resolve) => {
@@ -53,6 +61,15 @@ async function open(key, buf, aad) {
   return crypto.subtle.decrypt({ name: 'AES-GCM', iv: u.slice(0, 12), additionalData: enc.encode(aad) }, key, u.slice(12));
 }
 const aesKey = (raw) => crypto.subtle.importKey('raw', raw, 'AES-GCM', true, ['encrypt', 'decrypt']);
+const fromHex = (h) => new Uint8Array(h.match(/../g).map((b) => parseInt(b, 16)));
+async function hkdf(ikm, salt, info, bits) {
+  const k = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']);
+  return crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info: enc.encode(info) }, k, bits);
+}
+async function recoveryKeys(entropy) {
+  const b = await hkdf(entropy, enc.encode('plq-recovery'), 'plq2-rec', 512);
+  return { kek: await aesKey(b.slice(0, 32)), rid: hex(await crypto.subtle.digest('SHA-256', b.slice(32, 64))).slice(0, 32) };
+}
 
 function blobToDataURL(blob) {
   return new Promise((resolve) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.readAsDataURL(blob); });
@@ -113,25 +130,35 @@ export class WebVault {
   on(event, cb) { (this.listeners[event] ||= []).push(cb); return { remove: () => {} }; }
   emit(event, data) { (this.listeners[event] || []).forEach((cb) => cb(data)); }
 
-  async pepper(create) {
-    let p = await get('pepper');
-    if (!p && create) { p = rand(32).buffer; await put('pepper', p); }
-    return p;
+  async device() {
+    let d = await get('device');
+    if (!d) { d = { salt: rand(16).buffer, secret: rand(32).buffer }; await put('device', d); }
+    return d;
   }
 
-  async derive(pattern) {
-    const pepper = await this.pepper(true);
-    const pw = await crypto.subtle.importKey('raw', enc.encode(`plq1|5x5|${pattern.join('-')}`), 'PBKDF2', false, ['deriveBits']);
-    const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: pepper, iterations: ITER, hash: 'SHA-256' }, pw, 512);
-    const kek = await aesKey(bits.slice(0, 32));
-    const vaultId = hex(await crypto.subtle.digest('SHA-256', bits.slice(32, 64))).slice(0, 32);
-    return { kek, vaultId };
+  async derive(nuts) {
+    const { salt, secret } = await this.device();
+    const pw = await crypto.subtle.importKey('raw', enc.encode(`plq2|foret36|${nuts.join('-')}`), 'PBKDF2', false, ['deriveBits']);
+    const pre = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: ITER, hash: 'SHA-256' }, pw, 256);
+    const hk = await crypto.subtle.importKey('raw', secret, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const mixed = await crypto.subtle.sign('HMAC', hk, pre); // sur iPhone : ECDH avec la puce de sécurité
+    const bits = await hkdf(mixed, pre, 'plq2-keys', 512);
+    return { kek: await aesKey(bits.slice(0, 32)), vaultId: hex(await crypto.subtle.digest('SHA-256', bits.slice(32, 64))).slice(0, 32) };
   }
 
-  check(pattern) {
-    if (!Array.isArray(pattern) || pattern.length < 4 || new Set(pattern).size !== pattern.length) {
-      throw Object.assign(new Error('Relie au moins 4 points.'), { code: 'BAD_PATTERN' });
+  check(nuts) {
+    if (!Array.isArray(nuts) || nuts.length < 5 || nuts.length > 16 || nuts.some((n) => !Number.isInteger(n) || n < 0 || n > 35)) {
+      throw Object.assign(new Error('Cache au moins 5 noisettes.'), { code: 'BAD_PATTERN' });
     }
+  }
+
+  async writeRecovery(s) {
+    const entropy = rand(16);
+    const rk = await recoveryKeys(entropy);
+    const raw = await crypto.subtle.exportKey('raw', s.master);
+    await put(`v:${s.vaultId}:rec`, await seal(rk.kek, raw, 'plq-rec'));
+    await put(`v:${s.vaultId}:rid`, rk.rid);
+    return hex(entropy);
   }
 
   need() { if (!this.s) throw Object.assign(new Error('Le coffre est verrouillé.'), { code: 'LOCKED' }); return this.s; }
@@ -140,15 +167,15 @@ export class WebVault {
   async saveIndex() {
     const s = this.s;
     if (!s?.persisted) return;
-    await put(`v:${s.vaultId}:index`, await seal(s.master, enc.encode(JSON.stringify(s.index)), `plq-index|${s.vaultId}`));
+    await put(`v:${s.vaultId}:index`, await seal(s.master, enc.encode(JSON.stringify(s.index)), 'plq-index'));
   }
 
-  async status() { return { ready: true, problem: null }; }
+  async status() { return { ready: true, problem: null, enclave: false }; }
 
-  async unlock({ pattern }) {
-    this.check(pattern);
+  async unlock({ nuts }) {
+    this.check(nuts);
     this.s = null;
-    const { kek, vaultId } = await this.derive(pattern);
+    const { kek, vaultId } = await this.derive(nuts);
     let s = { vaultId, kek, master: await aesKey(rand(32)), persisted: false, index: { v: 1, items: [], settings: {} } };
     const wrapped = await get(`v:${vaultId}:key`);
     if (wrapped) {
@@ -157,7 +184,7 @@ export class WebVault {
         const master = await aesKey(raw);
         let index = { v: 1, items: [], settings: {} };
         const ei = await get(`v:${vaultId}:index`);
-        if (ei) index = JSON.parse(dec.decode(await open(master, ei, `plq-index|${vaultId}`)));
+        if (ei) index = JSON.parse(dec.decode(await open(master, ei, 'plq-index')));
         s = { vaultId, kek, master, persisted: true, index };
       } catch { /* coffre vide, sans erreur */ }
     }
@@ -165,18 +192,58 @@ export class WebVault {
     return { items: s.index.items, isNew: !s.persisted, settings: s.index.settings };
   }
 
-  async confirmNew({ pattern }) {
+  async confirmNew({ nuts }) {
     const s = this.need();
     if (s.persisted) return { ok: true };
-    try { this.check(pattern); } catch { return { ok: false }; }
-    const { vaultId } = await this.derive(pattern);
+    try { this.check(nuts); } catch { return { ok: false }; }
+    const { vaultId } = await this.derive(nuts);
     if (vaultId !== s.vaultId) return { ok: false };
     const raw = await crypto.subtle.exportKey('raw', s.master);
     await put(`v:${vaultId}:key`, await seal(s.kek, raw, `plq-key|${vaultId}`));
     s.persisted = true;
     await this.saveIndex();
-    return { ok: true };
+    return { ok: true, recovery: await this.writeRecovery(s) };
   }
+
+  async recoverStart({ entropy }) {
+    this.s = null;
+    this.pending = null;
+    if (!/^[0-9a-f]{32}$/.test(entropy || '')) return { found: false };
+    const rk = await recoveryKeys(fromHex(entropy));
+    for (const k of await keysWithPrefix('v:')) {
+      if (!k.endsWith(':rid') || (await get(k)) !== rk.rid) continue;
+      const vaultId = k.split(':')[1];
+      try {
+        const raw = await open(rk.kek, await get(`v:${vaultId}:rec`), 'plq-rec');
+        this.pending = { vaultId, raw };
+        return { found: true };
+      } catch { /* pas celui-là */ }
+    }
+    return { found: false };
+  }
+
+  async recoverFinish({ nuts }) {
+    this.check(nuts);
+    const p = this.pending;
+    if (!p) throw Object.assign(new Error('Le coffre est verrouillé.'), { code: 'LOCKED' });
+    const { kek, vaultId } = await this.derive(nuts);
+    if (vaultId !== p.vaultId && await get(`v:${vaultId}:key`)) {
+      throw Object.assign(new Error('Ces cachettes ouvrent déjà un autre coffre. Choisis-en d’autres.'), { code: 'IO' });
+    }
+    if (vaultId !== p.vaultId) {
+      for (const k of await keysWithPrefix(`v:${p.vaultId}:`)) {
+        await put(k.replace(`v:${p.vaultId}:`, `v:${vaultId}:`), await get(k));
+        await del(k);
+      }
+    }
+    await put(`v:${vaultId}:key`, await seal(kek, p.raw, `plq-key|${vaultId}`));
+    this.pending = null;
+    return this.unlock({ nuts });
+  }
+
+  async newRecovery() { const s = this.needPersisted(); return { recovery: await this.writeRecovery(s) }; }
+  async biometry() { return { available: false, type: 'none' }; }
+  async authenticate() { return { ok: true, available: false }; }
 
   async lock() { this.s = null; }
   async uncover() {}

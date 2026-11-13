@@ -67,6 +67,8 @@
 	<string>Planque enregistre dans Photos les fichiers que tu choisis de sortir du coffre.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Planque utilise l’appareil photo pour prendre des photos et des vidéos qui vont directement dans ton coffre, sans passer par ta pellicule.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Planque peut te demander Face ID avant d’afficher la forêt, si tu actives ce verrou dans les réglages.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Planque utilise le micro pour le son des vidéos que tu filmes directement dans ton coffre.</string>
 </dict>

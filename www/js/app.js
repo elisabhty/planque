@@ -1,6 +1,7 @@
 import { Vault, haptic, isNative } from './vault.js';
-import { PatternPad } from './pattern.js';
+import { Forest, MIN_NUTS, strength } from './forest.js';
 import { noisetteSVG, setNoisette, lookAt, resetLook } from './noisette.js';
+import { entropyToWords, wordsToEntropy, countKnown, suggest, choices } from './mnemonic.js';
 
 // ---------------------------------------------------------------------------
 // Icônes
@@ -22,6 +23,9 @@ const I = {
   mask: '<path d="M3 8c3-2 15-2 18 0 0 6-3 10-9 10S3 14 3 8z"/><path d="M7.5 11.5c1-1 2.5-1 3.5 0M13 11.5c1-1 2.5-1 3.5 0"/>',
   shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+  chip: '<rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>',
+  faceid: '<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M9 9.5v1M15 9.5v1M12 9.5v3.5h-1M9.5 15.5c1.4 1 3.6 1 5 0"/>',
+  phrase: '<path d="M4 6h16M4 10h10M4 14h16M4 18h8"/>',
 };
 const icon = (name, size = 22) =>
   `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[name] || ''}</svg>`;
@@ -130,6 +134,8 @@ function addedText(items) {
 // ---------------------------------------------------------------------------
 // Démarrage
 // ---------------------------------------------------------------------------
+const FACEID = 'plq.faceid';
+
 async function boot() {
   hydrate();
   if (!isNative) {
@@ -140,6 +146,8 @@ async function boot() {
 
   $$('[data-go]').forEach((b) => b.addEventListener('click', () => go(b.dataset.go)));
   $('#retry').addEventListener('click', boot2);
+  $('#problem-recover').addEventListener('click', () => openRecover('problem'));
+  $('#gate-go').addEventListener('click', gateAuth);
   $('#lock-btn').addEventListener('click', lockNow);
   $('#settings-btn').addEventListener('click', openSettings);
   $('#select-btn').addEventListener('click', () => setSelecting(!state.selecting));
@@ -147,8 +155,9 @@ async function boot() {
   $('#sel-share').addEventListener('click', () => shareItems([...state.selected]));
   $('#sel-delete').addEventListener('click', () => confirmDelete([...state.selected]));
   setupViewer();
-  setupLock();
-  setupCreate();
+  setupForest();
+  setupPhrase();
+  setupRecover();
   await boot2();
 }
 
@@ -156,45 +165,39 @@ async function boot2() {
   let st = { ready: true, problem: null };
   try { st = await Vault.status(); } catch { /* on tente quand même */ }
   if (st.problem === 'keyMissing') return show('problem');
-  if (localStorage.getItem(ONBOARDED)) return showLock();
+  if (localStorage.getItem(ONBOARDED)) return showEntry();
   show('intro');
+}
+
+/** Entrée dans l'appli : Face ID d'abord s'il est activé, puis la forêt. */
+function showEntry() {
+  if (localStorage.getItem(FACEID) === '1') {
+    show('gate');
+    setTimeout(gateAuth, 400);
+  } else {
+    showLock();
+  }
+}
+
+let gateBusy = false;
+async function gateAuth() {
+  if (gateBusy) return;
+  gateBusy = true;
+  try {
+    const r = await Vault.authenticate();
+    if (r.ok) { haptic('success'); showLock(); }
+  } catch { /* annulé */ } finally { gateBusy = false; }
 }
 
 function go(id) {
   haptic('light');
   if (id === 'how') {
-    const m = $('#intro .intro-mascot');
-    setNoisette(m, 'happy');
+    setNoisette($('#intro .intro-mascot'), 'happy');
     setTimeout(() => show('how'), 650);
     return;
   }
-  if (id === 'create') resetCreate();
+  if (id === 'create') return startSecret('create1');
   show(id);
-}
-
-// ---------------------------------------------------------------------------
-// Création du schéma (onboarding)
-// ---------------------------------------------------------------------------
-let createPad;
-let firstPattern = null;
-
-function setupCreate() {
-  const mascot = $('#create-mascot');
-  createPad = new PatternPad($('#create-pad'), {
-    onStart: () => setNoisette(mascot, 'awake'),
-    onMove: (x, y) => lookAt(mascot, x, y),
-    onPoint: () => haptic('light'),
-    onEnd: (pts) => onCreateDrawn(pts),
-  });
-}
-
-function resetCreate() {
-  firstPattern = null;
-  $('#create-title').textContent = 'Dessine ton schéma';
-  $('#create-sub').textContent = 'Relie au moins 4 points. Plus il est long, plus il est solide.';
-  setHint('#create-hint', '');
-  createPad?.reset();
-  setNoisette($('#create-mascot'), 'awake');
 }
 
 function setHint(sel, text, warn = false) {
@@ -203,102 +206,147 @@ function setHint(sel, text, warn = false) {
   h.classList.toggle('warn', warn);
 }
 
-async function onCreateDrawn(pts) {
-  const mascot = $('#create-mascot');
-  resetLook(mascot);
-  if (pts.length < 4) {
-    haptic('warning');
-    createPad.shake();
-    setHint('#create-hint', 'Relie au moins 4 points.', true);
-    setTimeout(() => createPad.reset(), 500);
-    return;
-  }
-  if (!firstPattern) {
-    firstPattern = pts;
-    createPad.done();
-    haptic('medium');
-    setTimeout(() => {
-      createPad.reset();
-      $('#create-title').textContent = 'Encore une fois';
-      $('#create-sub').textContent = 'Redessine le même schéma pour le confirmer.';
-      setHint('#create-hint', '');
-    }, 450);
-    return;
-  }
-  if (firstPattern.join('-') !== pts.join('-')) {
-    haptic('warning');
-    createPad.shake();
-    setHint('#create-hint', 'Ce n’est pas le même. On recommence depuis le début.', true);
-    setTimeout(resetCreate, 1100);
-    return;
-  }
-  createPad.done();
-  createPad.busy(true);
-  setNoisette(mascot, 'think');
-  setHint('#create-hint', 'Je fabrique ta clé…');
-  try {
-    const res = await Vault.unlock({ pattern: pts });
-    if (res.isNew) {
-      const c = await Vault.confirmNew({ pattern: pts });
-      if (!c.ok) throw new Error('confirm');
-    }
-    localStorage.setItem(ONBOARDED, '1');
-    haptic('success');
-    setNoisette(mascot, 'happy');
-    await wait(650);
-    openVault({ ...res, isNew: false });
-  } catch {
-    setHint('#create-hint', 'Un souci est survenu. Réessaie.', true);
-    resetCreate();
-  } finally {
-    createPad.busy(false);
-  }
-}
-
 // ---------------------------------------------------------------------------
-// Verrouillage
+// La forêt : verrouillage, création, confirmation, récupération
 // ---------------------------------------------------------------------------
-let lockPad;
+const MODES = {
+  lock: { title: 'Planque', sub: 'Cache tes noisettes dans le bon ordre.', go: 'Ouvrir', link: 'J’ai oublié mes cachettes', strength: false, mascot: 'sleep' },
+  create1: { title: 'Choisis tes cachettes', sub: 'Touche-les dans l’ordre, 6 ou plus. Une cachette peut servir deux fois.', go: 'Valider', link: '', strength: true, mascot: 'awake' },
+  create2: { title: 'Encore une fois', sub: 'Refais le même parcours, dans le même ordre.', go: 'Confirmer', link: 'Recommencer', strength: false, mascot: 'awake' },
+  confirm: { title: 'Nouveau coffre', sub: 'Refais le parcours qui a ouvert ce coffre pour le créer.', go: 'Créer le coffre', link: 'Annuler', strength: false, mascot: 'awake' },
+  recover1: { title: 'Nouvelles cachettes', sub: 'Coffre retrouvé ! Choisis le parcours qui l’ouvrira désormais.', go: 'Valider', link: 'Annuler', strength: true, mascot: 'awake' },
+  recover2: { title: 'Encore une fois', sub: 'Refais le même parcours, dans le même ordre.', go: 'Confirmer', link: 'Recommencer', strength: false, mascot: 'awake' },
+};
+let forest;
+const secret = { mode: 'lock', first: null, then: null };
 
-function setupLock() {
-  const mascot = $('#lock-mascot');
-  lockPad = new PatternPad($('#lock-pad'), {
-    onStart: () => { setNoisette(mascot, 'awake'); setHint('#lock-hint', ''); },
-    onMove: (x, y) => lookAt(mascot, x, y),
-    onPoint: () => haptic('light'),
-    onEnd: (pts) => onLockDrawn(pts),
+function setupForest() {
+  const mascot = $('#secret-mascot');
+  forest = new Forest($('#forest'), {
+    onStart: () => setNoisette(mascot, 'awake'),
+    onNut: (id, n, x, y) => { haptic('light'); lookAt(mascot, x, y); updateNuts(); },
   });
+  $('#secret-clear').onclick = () => {
+    haptic('light');
+    forest.clear();
+    resetLook(mascot);
+    updateNuts();
+  };
+  $('#secret-go').onclick = submitSecret;
+  $('#secret-link').onclick = secretLink;
 }
 
-function showLock() {
-  closeSheet();
-  closeViewer(true);
-  lockPad.reset();
-  lockPad.busy(false);
-  setHint('#lock-hint', '');
-  setNoisette($('#lock-mascot'), 'sleep');
-  resetLook($('#lock-mascot'));
-  show('lock');
-}
-
-async function onLockDrawn(pts) {
-  const mascot = $('#lock-mascot');
+function startSecret(mode, { keepFirst = false } = {}) {
+  secret.mode = mode;
+  if (!keepFirst) secret.first = null;
+  const m = MODES[mode];
+  $('#secret-title').textContent = m.title;
+  $('#secret-sub').textContent = m.sub;
+  $('#secret-go').textContent = m.go;
+  $('#secret-link').textContent = m.link;
+  $('#secret-link').style.visibility = m.link ? 'visible' : 'hidden';
+  forest.clear();
+  forest.busy(false);
+  const mascot = $('#secret-mascot');
+  setNoisette(mascot, m.mascot);
   resetLook(mascot);
-  if (pts.length < 4) {
-    haptic('warning');
-    lockPad.shake();
-    setHint('#lock-hint', 'Relie au moins 4 points.', true);
-    setTimeout(() => { lockPad.reset(); setNoisette(mascot, 'sleep'); }, 600);
-    return;
+  updateNuts();
+  show('secret');
+}
+
+function setBubble(text, level = 0) {
+  const b = $('#bubble');
+  b.textContent = text;
+  b.className = `bubble l${level}`;
+}
+
+function updateNuts() {
+  const seq = forest.sequence;
+  const n = seq.length;
+  $('#nuts').innerHTML = Array.from({ length: Math.max(MIN_NUTS, n) }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('');
+  $('#secret-go').disabled = n < MIN_NUTS;
+  $('#secret-clear').disabled = n === 0;
+  if (MODES[secret.mode].strength) {
+    const st = strength(seq);
+    setBubble(st.text, st.level);
+  } else {
+    setBubble('');
   }
-  // Même déroulé, même durée minimale et même Noisette pour tous les schémas :
-  // rien ne permet de savoir si ce schéma ouvre un vrai coffre, un leurre ou un coffre vide.
-  lockPad.done();
-  lockPad.busy(true);
+}
+
+function shakeForest() {
+  const f = $('#forest');
+  f.classList.remove('shake');
+  void f.offsetWidth;
+  f.classList.add('shake');
+}
+
+function secretFail(text) {
+  haptic('warning');
+  shakeForest();
+  forest.busy(false);
+  forest.clear();
+  updateNuts();
+  setNoisette($('#secret-mascot'), 'awake');
+  setBubble(text, 1);
+}
+
+async function submitSecret() {
+  const seq = forest.sequence;
+  if (seq.length < MIN_NUTS) return;
+  const mascot = $('#secret-mascot');
+  resetLook(mascot);
+  switch (secret.mode) {
+    case 'lock':
+      return doUnlock(seq);
+    case 'create1':
+    case 'recover1':
+      secret.first = seq;
+      haptic('medium');
+      setNoisette(mascot, 'happy');
+      forest.busy(true);
+      await wait(500);
+      return startSecret(secret.mode === 'create1' ? 'create2' : 'recover2', { keepFirst: true });
+    case 'create2':
+    case 'recover2': {
+      const first = secret.first || [];
+      if (seq.join('-') !== first.join('-')) {
+        secretFail('Ce n’est pas le même parcours. On recommence.');
+        forest.busy(true);
+        await wait(1300);
+        return startSecret(secret.mode === 'create2' ? 'create1' : 'recover1');
+      }
+      return secret.mode === 'create2' ? finishCreate(seq) : finishRecover(seq);
+    }
+    case 'confirm':
+      return finishConfirm(seq);
+    default:
+      return undefined;
+  }
+}
+
+function secretLink() {
+  haptic('light');
+  switch (secret.mode) {
+    case 'lock': return openRecover('lock');
+    case 'create2': return startSecret('create1');
+    case 'recover2': return startSecret('recover1');
+    case 'recover1': return lockNow();
+    case 'confirm': secret.then = null; return show('vault');
+    default: return undefined;
+  }
+}
+
+// Même déroulé, même durée minimale et même Noisette pour tous les parcours :
+// rien ne permet de savoir s'ils ouvrent un vrai coffre, un leurre ou un coffre vide.
+async function doUnlock(seq) {
+  const mascot = $('#secret-mascot');
+  forest.busy(true);
   setNoisette(mascot, 'think');
+  setBubble('');
   const started = performance.now();
   try {
-    const res = await Vault.unlock({ pattern: pts });
+    const res = await Vault.unlock({ nuts: seq });
     const elapsed = performance.now() - started;
     if (elapsed < 700) await wait(700 - elapsed);
     haptic('success');
@@ -306,12 +354,82 @@ async function onLockDrawn(pts) {
     await wait(420);
     openVault(res);
   } catch (e) {
-    lockPad.busy(false);
-    lockPad.reset();
+    forest.busy(false);
+    forest.clear();
+    updateNuts();
     setNoisette(mascot, 'sleep');
-    setHint('#lock-hint', e?.code === 'KEY_MISSING' ? 'Clé de l’iPhone introuvable.' : 'Réessaie.', true);
-    if (e?.code === 'KEY_MISSING') show('problem');
+    if (e?.code === 'KEY_MISSING') return show('problem');
+    setBubble('Réessaie.', 1);
   }
+  return undefined;
+}
+
+async function finishCreate(seq) {
+  const mascot = $('#secret-mascot');
+  forest.busy(true);
+  setNoisette(mascot, 'think');
+  setBubble('Je soude ta clé à la puce de l’iPhone…');
+  try {
+    const res = await Vault.unlock({ nuts: seq });
+    let recovery = null;
+    if (res.isNew) {
+      const c = await Vault.confirmNew({ nuts: seq });
+      if (!c.ok) throw new Error('confirm');
+      recovery = c.recovery;
+    }
+    localStorage.setItem(ONBOARDED, '1');
+    haptic('success');
+    setNoisette(mascot, 'happy');
+    await wait(600);
+    const enter = () => openVault({ ...res, isNew: false });
+    if (recovery) showPhrase(recovery, enter); else enter();
+  } catch {
+    secretFail('Un souci est survenu. Réessaie.');
+    await wait(1200);
+    startSecret('create1');
+  }
+}
+
+async function finishConfirm(seq) {
+  forest.busy(true);
+  setNoisette($('#secret-mascot'), 'think');
+  let c = { ok: false };
+  try { c = await Vault.confirmNew({ nuts: seq }); } catch { c = { ok: false }; }
+  if (!c.ok) return secretFail('Ce n’est pas le parcours qui a ouvert ce coffre.');
+  state.isNew = false;
+  haptic('success');
+  setNoisette($('#secret-mascot'), 'happy');
+  await wait(500);
+  const then = secret.then;
+  secret.then = null;
+  const back = () => { show('vault'); then?.(); };
+  if (c.recovery) showPhrase(c.recovery, back); else back();
+  return undefined;
+}
+
+async function finishRecover(seq) {
+  forest.busy(true);
+  setNoisette($('#secret-mascot'), 'think');
+  setBubble('Je remets la clé en place…');
+  try {
+    const res = await Vault.recoverFinish({ nuts: seq });
+    localStorage.setItem(ONBOARDED, '1');
+    haptic('success');
+    setNoisette($('#secret-mascot'), 'happy');
+    await wait(500);
+    openVault(res);
+    toast('Coffre retrouvé, avec tes nouvelles cachettes');
+  } catch (e) {
+    secretFail(e?.code === 'IO' && e.message ? e.message : 'Un souci est survenu. Réessaie.');
+    await wait(1600);
+    startSecret('recover1');
+  }
+}
+
+function showLock() {
+  closeSheet();
+  closeViewer(true);
+  startSecret('lock');
 }
 
 async function lockNow() {
@@ -324,7 +442,8 @@ async function lockNow() {
 function onLocked() {
   // Envoyé par iOS quand l'appli passe en arrière-plan : tout est déjà effacé côté natif.
   clearVault();
-  if (localStorage.getItem(ONBOARDED)) showLock();
+  const inside = ['vault', 'secret', 'phrase', 'quiz', 'recover', 'gate'].includes(current?.id);
+  if (localStorage.getItem(ONBOARDED) && inside) showEntry();
   requestAnimationFrame(() => requestAnimationFrame(() => Vault.uncover().catch(() => {})));
 }
 
@@ -336,9 +455,121 @@ function clearVault() {
   state.isNew = false;
   setSelecting(false);
   $('#grid').innerHTML = '';
+  $('#words').innerHTML = '';
   $('#busy').classList.remove('show');
   closeViewer(true);
   closeSheet();
+}
+
+// ---------------------------------------------------------------------------
+// Phrase de secours : affichage, vérification, saisie
+// ---------------------------------------------------------------------------
+let phraseState = { words: [], then: null };
+let quizState = { idx: [], picks: {} };
+
+async function showPhrase(hex, then) {
+  phraseState = { words: await entropyToWords(hex), then };
+  $('#words').innerHTML = phraseState.words.map((w) => `<span>${esc(w)}</span>`).join('');
+  show('phrase');
+  $('#phrase .scroll-body').scrollTop = 0;
+}
+
+function setupPhrase() {
+  $('#phrase-done').onclick = () => { haptic('light'); showQuiz(); };
+  $('#quiz-back').onclick = () => show('phrase');
+  $('#quiz-ok').onclick = checkQuiz;
+}
+
+function showQuiz() {
+  const w = phraseState.words;
+  const a = Math.floor(Math.random() * 6);
+  const b = 6 + Math.floor(Math.random() * 6);
+  quizState = { idx: [a, b], picks: {} };
+  $('#quiz-body').innerHTML = [a, b].map((i) => `
+    <b>Quel est le mot n° ${i + 1} ?</b>
+    <div class="chips" data-q="${i}">${choices(w[i]).map((c) => `<button class="chip" data-w="${esc(c)}">${esc(c)}</button>`).join('')}</div>`).join('');
+  $$('#quiz-body .chips').forEach((row) => row.addEventListener('click', (e) => {
+    const chip = e.target.closest('.chip');
+    if (!chip) return;
+    haptic('select');
+    $$('.chip', row).forEach((x) => x.classList.toggle('on', x === chip));
+    quizState.picks[row.dataset.q] = chip.dataset.w;
+    $('#quiz-ok').disabled = Object.keys(quizState.picks).length < 2;
+  }));
+  $('#quiz-ok').disabled = true;
+  show('quiz');
+}
+
+function checkQuiz() {
+  const w = phraseState.words;
+  if (!quizState.idx.every((i) => quizState.picks[i] === w[i])) {
+    haptic('warning');
+    toast('Ce n’est pas le bon mot. Relis ta phrase.');
+    show('phrase');
+    return;
+  }
+  haptic('success');
+  const then = phraseState.then;
+  phraseState = { words: [], then: null };
+  $('#words').innerHTML = '';
+  then?.();
+}
+
+let recoverFrom = 'lock';
+function openRecover(from) {
+  recoverFrom = from;
+  $('#recover-input').value = '';
+  $('#recover-suggest').innerHTML = '';
+  setHint('#recover-hint', '');
+  show('recover');
+}
+
+function setupRecover() {
+  const input = $('#recover-input');
+  input.addEventListener('input', () => {
+    const v = input.value;
+    const n = countKnown(v);
+    const last = /\s$/.test(v) ? '' : (v.split(/\s+/).pop() || '');
+    $('#recover-suggest').innerHTML = suggest(last).map((w) => `<button class="chip" data-w="${esc(w)}">${esc(w)}</button>`).join('');
+    setHint('#recover-hint', n ? `${n} / 12 mots reconnus` : '');
+  });
+  $('#recover-suggest').addEventListener('click', (e) => {
+    const chip = e.target.closest('.chip');
+    if (!chip) return;
+    const parts = input.value.split(/\s+/);
+    parts[parts.length - 1] = chip.dataset.w;
+    input.value = `${parts.join(' ')} `;
+    input.dispatchEvent(new Event('input'));
+    input.focus();
+  });
+  $('#recover-back').onclick = () => (recoverFrom === 'problem' ? show('problem') : showLock());
+  $('#recover-go').onclick = submitRecover;
+}
+
+async function submitRecover() {
+  const r = await wordsToEntropy($('#recover-input').value);
+  if (!r.ok) {
+    haptic('warning');
+    const msg = r.reason === 'unknown' ? `Mot inconnu : « ${r.unknown[0]} ».`
+      : r.reason === 'count' ? `Il faut 12 mots (là, il y en a ${r.count}).`
+        : 'Un des mots est faux ou pas à sa place.';
+    setHint('#recover-hint', msg, true);
+    return;
+  }
+  setHint('#recover-hint', 'Je cherche ton coffre…');
+  try {
+    const f = await Vault.recoverStart({ entropy: r.hex });
+    if (!f.found) {
+      haptic('warning');
+      setHint('#recover-hint', 'Aucun coffre de cet iPhone ne correspond à cette phrase.', true);
+      return;
+    }
+    $('#recover-input').value = '';
+    haptic('success');
+    startSecret('recover1');
+  } catch {
+    setHint('#recover-hint', 'Un souci est survenu. Réessaie.', true);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -485,47 +716,10 @@ function openImport() {
   });
 }
 
-/** Un schéma qui n'ouvrait aucun coffre : on le fait redessiner avant de créer le coffre. */
+/** Des cachettes qui n'ouvraient aucun coffre : on refait le parcours avant de créer le coffre. */
 function confirmNewVault(then) {
-  setTimeout(() => openSheet(`
-    <div class="row-mascot">
-      <div data-noisette="awake" data-size="72" id="confirm-mascot"></div>
-      <div class="txt"><h3>Nouveau coffre</h3></div>
-    </div>
-    <p>Redessine ton schéma pour créer ce coffre. Retiens-le bien : personne ne pourra le retrouver pour toi.</p>
-    <div id="confirm-pad" style="width:min(76vw,280px)"></div>
-    <div class="hint" id="confirm-hint" style="text-align:center"></div>
-  `, {
-    onMount: () => {
-      const mascot = $('#confirm-mascot');
-      const pad = new PatternPad($('#confirm-pad'), {
-        onMove: (x, y) => lookAt(mascot, x, y),
-        onPoint: () => haptic('light'),
-        onEnd: async (pts) => {
-          resetLook(mascot);
-          pad.busy(true);
-          setNoisette(mascot, 'think');
-          let ok = false;
-          try { ok = (await Vault.confirmNew({ pattern: pts })).ok; } catch { ok = false; }
-          pad.busy(false);
-          if (!ok) {
-            haptic('warning');
-            pad.shake();
-            setNoisette(mascot, 'awake');
-            setHint('#confirm-hint', 'Ce n’est pas le schéma qui a ouvert ce coffre.', true);
-            setTimeout(() => pad.reset(), 600);
-            return;
-          }
-          state.isNew = false;
-          haptic('success');
-          setNoisette(mascot, 'happy');
-          await wait(500);
-          closeSheet();
-          then();
-        },
-      });
-    },
-  }), 260);
+  secret.then = then;
+  startSecret('confirm');
 }
 
 async function runImport(src) {
@@ -724,10 +918,14 @@ function closeViewer(silent) {
 // ---------------------------------------------------------------------------
 // Réglages du coffre
 // ---------------------------------------------------------------------------
-function openSettings() {
+async function openSettings() {
   haptic('light');
   const size = state.items.reduce((a, i) => a + (i.size || 0), 0);
   const ask = state.settings.askDeleteOriginals !== 'no';
+  const faceOn = localStorage.getItem(FACEID) === '1';
+  let bio = { available: false, type: 'none' };
+  try { bio = await Vault.biometry(); } catch { /* indisponible */ }
+  const bioName = bio.type === 'faceID' ? 'Face ID' : bio.type === 'touchID' ? 'Touch ID' : 'Code de l’iPhone';
   openSheet(`
     <div class="row-mascot">
       <div data-noisette="awake" data-size="72"></div>
@@ -737,24 +935,67 @@ function openSettings() {
       <div class="txt"><b>Proposer de supprimer les originaux</b><small>Après un import depuis Photos</small></div>
       <button class="switch ${ask ? 'on' : ''}" id="sw-ask" role="switch" aria-checked="${ask}"></button>
     </div>
+    <div class="setting">
+      <div class="txt"><b>${bioName} avant la forêt</b><small>Un verrou de plus à l’ouverture de l’appli, pour tous les coffres</small></div>
+      <button class="switch ${faceOn ? 'on' : ''}" id="sw-face" role="switch" aria-checked="${faceOn}"></button>
+    </div>
+    <button class="opt" id="new-phrase"><span class="ico">${icon('phrase')}</span><span><b>Nouvelle phrase de secours</b><small>Si tu as perdu celle de ce coffre</small></span></button>
     <button class="opt" id="info-decoy"><span class="ico">${icon('mask')}</span><span><b>Créer un coffre leurre</b><small>Pour le jour où on te force à ouvrir Planque</small></span></button>
-    <button class="opt" id="info-security"><span class="ico">${icon('shield')}</span><span><b>Comment tes fichiers sont protégés</b><small>Chiffrement, sauvegarde, changement d’iPhone</small></span></button>
+    <button class="opt" id="info-security"><span class="ico">${icon('shield')}</span><span><b>Comment tes fichiers sont protégés</b><small>Puce de sécurité, chiffrement, changement d’iPhone</small></span></button>
     <div class="actions" style="margin-top:22px">
       <button class="btn danger small" id="destroy">Effacer ce coffre</button>
     </div>
   `, {
     onMount: (body) => {
       $('#sw-ask', body).onclick = async (e) => {
-        const on = !e.currentTarget.classList.contains('on');
-        e.currentTarget.classList.toggle('on', on);
-        e.currentTarget.setAttribute('aria-checked', on);
+        const el = e.currentTarget;
+        const on = !el.classList.contains('on');
+        el.classList.toggle('on', on);
+        el.setAttribute('aria-checked', on);
         haptic('select');
         state.settings.askDeleteOriginals = on ? 'yes' : 'no';
         try { await Vault.setSetting({ key: 'askDeleteOriginals', value: on ? 'yes' : 'no' }); } catch { /* coffre non créé */ }
       };
+      $('#sw-face', body).onclick = async (e) => {
+        const el = e.currentTarget;
+        const on = !el.classList.contains('on');
+        if (on) {
+          const r = await Vault.authenticate().catch(() => ({ ok: false }));
+          if (!r.ok) return;
+          if (r.available === false && isNative) { toast('Active un code sur ton iPhone pour utiliser ce verrou.'); return; }
+        }
+        el.classList.toggle('on', on);
+        el.setAttribute('aria-checked', on);
+        haptic('select');
+        if (on) localStorage.setItem(FACEID, '1'); else localStorage.removeItem(FACEID);
+      };
+      $('#new-phrase', body).onclick = confirmNewPhrase;
       $('#info-decoy', body).onclick = showDecoyInfo;
       $('#info-security', body).onclick = showSecurityInfo;
       $('#destroy', body).onclick = confirmDestroy;
+    },
+  });
+}
+
+function confirmNewPhrase() {
+  if (state.isNew) { toast('Ajoute d’abord un fichier pour créer ce coffre.'); return; }
+  openSheet(`
+    <h3>Nouvelle phrase de secours ?</h3>
+    <p>L’ancienne phrase de ce coffre ne marchera plus. Les autres coffres ne sont pas touchés.</p>
+    <div class="actions">
+      <button class="btn" id="np-yes">Créer une nouvelle phrase</button>
+      <button class="btn ghost" id="np-no">Annuler</button>
+    </div>
+  `, {
+    onMount: (b) => {
+      $('#np-no', b).onclick = closeSheet;
+      $('#np-yes', b).onclick = async () => {
+        closeSheet();
+        try {
+          const { recovery } = await Vault.newRecovery();
+          showPhrase(recovery, () => { show('vault'); toast('Nouvelle phrase enregistrée'); });
+        } catch { toast('Impossible pour le moment.'); }
+      };
     },
   });
 }
@@ -765,9 +1006,9 @@ function showDecoyInfo() {
       <div data-noisette="awake" data-size="72"></div>
       <div class="txt"><h3>Le coffre leurre</h3></div>
     </div>
-    <p>Chaque schéma ouvre son propre coffre. Un schéma inconnu n’affiche jamais d’erreur : il ouvre un coffre vide.</p>
-    <p><b style="color:var(--text)">Pour en créer un :</b> verrouille Planque, dessine un autre schéma, puis mets-y quelques photos sans importance.</p>
-    <p>Si quelqu’un te force à ouvrir l’appli, tu dessines celui-là. Rien n’indique combien de coffres existent, et Noisette réagit exactement pareil dans tous.</p>
+    <p>Chaque parcours ouvre son propre coffre. Des cachettes inconnues n’affichent jamais d’erreur : elles ouvrent un coffre vide.</p>
+    <p><b style="color:var(--text)">Pour en créer un :</b> verrouille Planque, cache tes noisettes ailleurs, puis mets-y quelques photos sans importance.</p>
+    <p>Si quelqu’un te force à ouvrir l’appli, c’est ce parcours-là que tu fais. Rien n’indique combien de coffres existent, et Noisette réagit exactement pareil dans tous.</p>
     <div class="actions"><button class="btn ghost" id="back">Compris</button></div>
   `, { onMount: (b) => { $('#back', b).onclick = closeSheet; } });
 }
@@ -779,9 +1020,9 @@ function showSecurityInfo() {
       <div class="txt"><h3>Ce que fait Planque</h3></div>
     </div>
     <p>Chaque fichier est chiffré en AES-256 sur ton iPhone dès son arrivée. Les noms, les dates et les miniatures aussi.</p>
-    <p>La clé vient de ton schéma et d’un secret rangé dans le trousseau de ton iPhone. Sans les deux, tes fichiers ne sont que des données illisibles. Pas de compte, pas de serveur : personne d’autre que toi ne peut les ouvrir, nous compris.</p>
-    <p>Quand tu quittes l’appli, le coffre se verrouille et l’aperçu dans le sélecteur d’applis est masqué.</p>
-    <div class="note"><b style="color:var(--text)">Changer d’iPhone :</b> tes coffres chiffrés suivent la sauvegarde iCloud de ton iPhone. Pour les rouvrir sur le nouveau, garde « Mots de passe et trousseau » activé dans iCloud.</div>
+    <p>La clé vient de tes cachettes et d’une clé rangée dans la puce de sécurité de ton iPhone, d’où elle ne peut pas sortir. Chaque essai doit donc passer par ton iPhone : copier tes fichiers ailleurs ne sert à rien.</p>
+    <p>Pas de compte, pas de serveur : personne d’autre que toi ne peut ouvrir tes coffres, nous compris.</p>
+    <div class="note"><b style="color:var(--text)">Changer d’iPhone :</b> tes coffres chiffrés suivent la sauvegarde de ton iPhone, mais pas la clé de la puce. Sur le nouvel iPhone, rouvre chaque coffre avec sa phrase de secours.</div>
     <div class="actions"><button class="btn ghost" id="back">Fermer</button></div>
   `, { onMount: (b) => { $('#back', b).onclick = closeSheet; } });
 }

@@ -1,14 +1,16 @@
 # Planque
 
 Coffre-fort chiffré pour iPhone, avec **Noisette**, l'écureuil qui planque tes photos.
-Photos, vidéos et documents chiffrés en AES-256 sur l'iPhone. Pas de compte, pas de serveur, un schéma = un coffre (coffre leurre compris).
+Photos, vidéos et documents chiffrés en AES-256 sur l'iPhone. La clé vient des **cachettes de Noisette** (l'ordre dans lequel tu caches tes noisettes dans une forêt de 36 cachettes) et de la **puce de sécurité** de l'iPhone. Pas de compte, pas de serveur ; un parcours = un coffre (coffre leurre compris) ; une phrase de secours de 12 mots par coffre.
 
 > Nom et mascotte provisoires : tout se change facilement (voir plus bas).
 
 ## Ce qui est fait
 
-- **Onboarding** : bienvenue, trois choses à savoir, création du schéma (dessiné deux fois).
-- **Verrouillage** : grille 5 × 5, Noisette dort, se réveille, suit le doigt des yeux, réfléchit, puis se réjouit. Même réaction pour tous les schémas.
+- **Onboarding** : bienvenue, trois choses à savoir, choix des cachettes (deux fois), phrase de secours avec vérification.
+- **La forêt** : 36 cachettes illustrées (trous du chêne, nichoir, lanterne, lune, terrier, botte…). Noisette se réveille, suit des yeux chaque noisette et juge la solidité du parcours. Même réaction pour tous les parcours.
+- **Phrase de secours** : 12 mots (BIP39, liste française), pour les cachettes oubliées et les changements d'iPhone. Saisie sans accents ni majuscules, avec suggestions.
+- **Face ID** (option) avant la forêt.
 - **Coffre** : galerie (miniatures chiffrées, chargées à la demande), import depuis Photos, l'appareil photo (sans passer par la pellicule) et Fichiers, visionneuse photo (balayage, double-tap pour zoomer), lecture vidéo et aperçu de documents natifs, sélection multiple, partage, suppression.
 - **Après un import Photos** : proposition de supprimer les originaux de la pellicule (avec le rappel « Supprimés récemment »).
 - **Réglages du coffre** : créer un coffre leurre, explication de la protection, effacer le coffre.
@@ -43,11 +45,12 @@ L'interface tourne avec un coffre **simulé** (WebCrypto + IndexedDB, mêmes rè
 www/                      Interface (HTML/CSS/JS, sans framework)
   js/app.js               Écrans, galerie, import, visionneuse, réglages
   js/noisette.js          La mascotte (SVG animé, 5 états)
-  js/pattern.js           Grille de schéma 5 × 5
+  js/forest.js            La forêt et ses 36 cachettes (⚠️ ne jamais renuméroter)
+  js/mnemonic.js          Phrase de secours (BIP39) ; js/words-fr.js : la liste de mots
   js/vault.js             Pont vers le plugin natif (ou la simulation)
   js/vault-web.js         Simulation pour le navigateur
 ios/App/App/
-  VaultPlugin.swift       Cœur : clés, chiffrement, import, aperçus, verrouillage
+  VaultPlugin.swift       Cœur : puce de sécurité, clés, chiffrement, récupération, import, aperçus
   MainViewController.swift Enregistre le plugin
 SECURITE.md               Ce que le chiffrement protège, et ses limites
 ```
@@ -59,14 +62,15 @@ L'icône, l'écran de lancement et le cache du sélecteur d'applis sont dans `io
 
 ## Étapes suivantes
 
-1. **Phrase de récupération** (12 mots) pour retrouver l'accès en cas d'oubli du schéma ou de changement d'iPhone.
-2. **Paywall** (gratuit jusqu'à un certain nombre de fichiers, puis abonnement), avec StoreKit ou RevenueCat.
-3. **Sauvegarde iCloud chiffrée** propre à Planque (CloudKit, base privée de l'utilisateur).
-4. **Partage d'un coffre** avec une personne de confiance.
-5. **Site + guides SEO** (la méthode du post Vaultaire).
+1. **Paywall** (gratuit jusqu'à un certain nombre de fichiers, puis abonnement), avec StoreKit ou RevenueCat.
+2. **Sauvegarde iCloud chiffrée** propre à Planque (CloudKit, base privée de l'utilisateur).
+3. **Partage d'un coffre** avec une personne de confiance.
+4. **Site + guides SEO** (la méthode du post Vaultaire).
+
+> Sur le simulateur iOS (pas de puce de sécurité), la clé de l'appareil est logicielle. Teste la sécurité sur un vrai iPhone.
 
 ## App Store
 
 - L'appli utilise du chiffrement : App Store Connect pose des questions de conformité à l'export, et la France a sa propre procédure de déclaration des moyens de cryptologie (ANSSI). **À vérifier avant la première soumission.**
-- Textes de permission (Photos, appareil photo, micro) déjà rédigés dans `Info.plist`.
+- Textes de permission (Photos, appareil photo, micro, Face ID) déjà rédigés dans `Info.plist`.
 - iPhone uniquement, portrait.

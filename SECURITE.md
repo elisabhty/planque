@@ -2,50 +2,69 @@
 
 Ce document décrit ce que fait vraiment le code (`ios/App/App/VaultPlugin.swift`), et ce qu'il ne fait pas. Il sert de base à l'audit à faire avant toute communication du type « inviolable ».
 
-## Clés
+## Le secret : les cachettes de Noisette
 
-1. **Schéma** : grille 5 × 5, au moins 4 points, sans répétition.
-2. **Poivre de l'appareil** : 32 octets aléatoires, créés au premier lancement et rangés dans le trousseau iOS (`kSecAttrAccessibleAfterFirstUnlock`, synchronisé par le trousseau iCloud, chiffré de bout en bout). Une empreinte non secrète est gardée dans `meta.json` pour détecter un poivre manquant (écran « La clé de cet iPhone est introuvable ») plutôt que d'en recréer un.
-3. **Dérivation** : PBKDF2-HMAC-SHA256, 600 000 tours, mot de passe = schéma, sel = poivre → 64 octets.
-   - octets 0 à 31 : **clé d'enveloppe** (KEK) ;
-   - octets 32 à 63 : **localisateur** → SHA-256 → nom du dossier du coffre (32 caractères hexadécimaux).
-4. **Clé maîtresse** : 256 bits aléatoires par coffre, enveloppée par la KEK en AES-256-GCM (`key.bin`). Changer de schéma n'imposera donc pas de rechiffrer les fichiers.
+- Une forêt illustrée avec **36 cachettes**. Le secret est la **suite ordonnée** des cachettes touchées : de 5 à 16 noisettes, et une cachette peut servir plusieurs fois.
+- Espace : 36⁵ ≈ 60 millions de suites à 5 noisettes, 36⁶ ≈ 2,2 milliards à 6, 36⁸ ≈ 2 800 milliards à 8. L'appli recommande 6 noisettes ou plus, et Noisette signale les parcours trop simples (répétitions, même cachette deux fois de suite).
+- Les numéros des cachettes font partie de la clé (`www/js/forest.js`) : on peut redessiner la forêt, mais **jamais renuméroter** les cachettes après la mise en ligne.
 
-## Données
+## Les clés
+
+1. **Clé de l'appareil** : clé P-256 créée **dans la puce de sécurité** (Secure Enclave). Elle ne peut pas en sortir, n'est dans aucune sauvegarde et ne passe pas sur un autre iPhone. Le trousseau ne garde qu'une référence chiffrée que seule cette puce sait utiliser (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`).
+2. **Dérivation, à chaque essai** :
+   - PBKDF2-HMAC-SHA256, 600 000 tours (sel aléatoire propre à l'appareil) → `pre` ;
+   - `pre` → clé P-256 éphémère → **accord ECDH avec la clé de la puce** → secret partagé ;
+   - HKDF-SHA256(secret partagé, sel = `pre`) → 64 octets : clé d'enveloppe (KEK) + localisateur (→ SHA-256 → nom du dossier du coffre).
+
+   Chaque essai doit donc passer par la puce de **cet** iPhone : une copie des fichiers ne permet pas de tester des cachettes ailleurs, même avec une ferme de serveurs.
+3. **Clé maîtresse** : 256 bits aléatoires par coffre, enveloppée deux fois en AES-256-GCM :
+   - par la KEK des cachettes (`key.bin`) ;
+   - par la **phrase de secours** (`rec.bin`).
+
+## La phrase de secours
+
+- 12 mots, norme BIP39 (liste officielle française), soit 128 bits aléatoires et une somme de contrôle. Elle est créée pour chaque coffre et montrée **une seule fois**, avec une vérification de deux mots.
+- HKDF(phrase) → clé d'enveloppe de secours + identifiant (`rid`, une empreinte qui ne révèle rien). La phrase ne dépend pas de l'appareil, et 128 bits sont hors de portée d'une attaque par force brute, même hors de l'iPhone.
+- Elle sert à deux choses :
+  - **cachettes oubliées** : on saisit la phrase, puis on choisit de nouvelles cachettes, et l'ancien parcours n'ouvre plus rien ;
+  - **nouvel iPhone** : les coffres chiffrés arrivent avec la sauvegarde de l'iPhone, mais la clé de la puce ne suit pas. On rouvre chaque coffre avec sa phrase, et une nouvelle clé de puce est créée.
+- On peut générer une **nouvelle phrase** depuis les réglages du coffre ; l'ancienne cesse alors de marcher.
+
+## Les données
 
 | Élément | Protection |
 |---|---|
-| Fichiers (photos, vidéos, documents) | AES-256-GCM par blocs de 1 Mo ; l'identifiant du fichier, le numéro de bloc et un drapeau « dernier bloc » sont authentifiés, ce qui bloque la troncature, la permutation et l'échange de fichiers |
-| Miniatures | Chiffrées de la même façon (`t/<id>`) |
-| Index (noms, dates, tailles, dimensions, réglages) | Un seul bloc AES-256-GCM (`index.bin`) |
-| Noms sur le disque | UUID aléatoires : aucun nom d'origine |
-| Protection iOS | Tous les fichiers en `NSFileProtectionComplete` (illisibles quand l'iPhone est verrouillé) |
+| Fichiers (photos, vidéos, documents) | AES-256-GCM par blocs de 1 Mo ; identifiant du fichier, numéro de bloc et drapeau « dernier bloc » authentifiés (pas de troncature, de permutation ni d'échange de fichiers) |
+| Miniatures | Chiffrées de la même façon |
+| Index (noms, dates, tailles, dimensions, réglages) | Un bloc AES-256-GCM |
+| Noms sur le disque | UUID aléatoires |
+| Protection iOS | `NSFileProtectionComplete` partout (illisible quand l'iPhone est verrouillé) |
 
-Aucune cryptographie maison : CryptoKit (AES-GCM, SHA-256), CommonCrypto (PBKDF2), Security (trousseau, aléa).
+Aucune cryptographie maison : CryptoKit (AES-GCM, ECDH P-256, HKDF, SHA-256, Secure Enclave), CommonCrypto (PBKDF2), Security (trousseau, aléa).
 
 ## Coffres multiples et leurre
 
-- Chaque schéma mène à son propre dossier. Un schéma inconnu ouvre un coffre **vide en mémoire**, sans message d'erreur ; il n'est écrit sur le disque qu'au premier import, après une deuxième saisie du schéma.
-- Même déroulé, même durée minimale (700 ms) et même animation de Noisette pour tous les schémas.
-- L'interface n'affiche jamais le nombre de coffres.
+- Chaque parcours mène à son propre dossier. Un parcours inconnu ouvre un coffre **vide en mémoire**, sans erreur. Il n'est écrit sur le disque qu'au premier import, après un deuxième passage du même parcours.
+- Même déroulé, même durée minimale (700 ms) et même animation de Noisette pour tous les parcours. Le nombre de coffres n'est affiché nulle part.
 
 ## Pendant l'utilisation
 
-- Le coffre se verrouille dès que l'appli passe en arrière-plan : clés effacées de la session, fichiers temporaires supprimés, fenêtres natives fermées.
-- Un cache opaque masque l'appli dans le sélecteur d'applis. En version publiée (Release), il masque aussi l'appli pendant un enregistrement ou un partage d'écran (désactivé en version de développement pour filmer des démos).
-- L'import depuis Photos chiffre le fichier fourni par iOS **sans copie en clair** ; les copies temporaires de l'appareil photo et de Fichiers sont supprimées juste après le chiffrement.
-- Les photos s'affichent depuis la mémoire. Les vidéos et les documents sont déchiffrés dans un dossier temporaire protégé, supprimé à la fermeture de l'aperçu ou au verrouillage.
+- Verrouillage dès que l'appli passe en arrière-plan : session et clés effacées, fichiers temporaires supprimés, fenêtres natives fermées.
+- Cache opaque dans le sélecteur d'applis ; en version publiée (Release), aussi pendant un enregistrement ou un partage d'écran.
+- **Face ID / code de l'iPhone** (option) : verrou d'accès **en plus** des cachettes, avant d'afficher la forêt. Il n'entre pas dans la clé : c'est un garde, pas une partie du chiffrement.
+- À la saisie, une noisette apparaît brièvement sur la cachette touchée, sans laisser de trace du parcours (contrairement à un schéma dessiné).
+- L'import depuis Photos chiffre le fichier fourni par iOS sans copie en clair. Les vidéos et les documents ouverts sont déchiffrés dans un dossier temporaire protégé, effacé à la fermeture ou au verrouillage.
 
-## Limites connues (à assumer ou à traiter)
+## Limites connues
 
-- **Appareil compromis ou déverrouillé** : un logiciel malveillant ou quelqu'un qui a l'iPhone ouvert et le coffre ouvert voit ce que l'utilisateur voit. Les clés sont en mémoire tant que le coffre est ouvert.
-- **Regard par-dessus l'épaule** : le schéma se dessine à l'écran.
-- **Essais sur l'appareil** : pas de blocage après X essais (ce serait un indice pour le leurre). Chaque essai coûte environ 0,3 à 1 s de calcul. Avec au moins 4 points sur 5 × 5, l'espace est grand, mais un schéma court reste plus faible : l'appli conseille un schéma long.
-- **Analyse technique du conteneur** : le nombre de dossiers de coffres, leur taille et le nombre de fichiers chiffrés sont visibles par quelqu'un qui extrait les fichiers de l'appli. Le leurre résiste à la contrainte humaine (« ouvre l'appli »), pas à une expertise judiciaire.
-- **Schéma oublié = données perdues.** **Poivre perdu** (nouvel iPhone sans trousseau iCloud, ni sauvegarde chiffrée) **= données perdues.** La phrase de récupération (étape suivante) répond à ces deux cas.
-- **Sauvegarde** : les coffres (chiffrés) sont inclus dans la sauvegarde iCloud / Finder de l'iPhone. Pas encore de sauvegarde Planque dédiée.
-- **Fichiers ouverts dans une autre appli** : ce que l'utilisateur partage ou enregistre hors du coffre n'est plus protégé.
+- **Appareil compromis ou coffre ouvert** : ce que l'utilisateur voit, un logiciel malveillant ou une personne qui tient l'iPhone ouvert peut le voir. Les clés sont en mémoire tant que le coffre est ouvert.
+- **Regard par-dessus l'épaule** : quelqu'un qui filme ou regarde la saisie peut retenir le parcours.
+- **Essais sur l'iPhone lui-même** : pas de blocage après X essais (ce serait un indice pour le leurre). Chaque essai coûte environ une demi-seconde à une seconde de calcul, plus le passage par la puce. Un parcours de 6 noisettes ou plus rend cette attaque irréaliste ; un parcours de 5 noisettes simples reste le point faible.
+- **Analyse technique du conteneur** : le nombre de coffres, leur taille et le nombre de fichiers chiffrés sont visibles par quelqu'un qui extrait les fichiers de l'appli. Le leurre résiste à la contrainte humaine (« ouvre l'appli »), pas à une expertise judiciaire.
+- **Cachettes ET phrase perdues = données perdues.** Personne ne peut les récupérer, nous compris.
+- **Changement d'iPhone** : il faut la phrase de chaque coffre.
+- **Fichiers sortis du coffre** (partage, enregistrement) : ils ne sont plus protégés.
 
 ## Avant de communiquer
 
-Faire relire `VaultPlugin.swift` par un spécialiste en sécurité iOS avant d'écrire « même nous ne pouvons rien voir » ou « inviolable » sur le site ou l'App Store. La première phrase est vraie par construction (aucun serveur, aucune clé chez nous) ; la seconde n'est vraie pour aucune appli.
+Faire relire `VaultPlugin.swift` par un spécialiste en sécurité iOS avant d'écrire « inviolable » sur le site ou l'App Store. « Même nous ne pouvons pas voir tes photos » et « ta clé ne quitte jamais la puce de ton iPhone » sont vrais par construction.
