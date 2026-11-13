@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Planque">
+  <meta name="theme-color" content="#0E1311">
+  <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <title>Planque</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div class="ambient"></div>
+  <main id="app">
+
+    <!-- 1. Bienvenue -->
+    <section class="screen" id="intro">
+      <div class="center">
+        <div class="intro-mascot" data-noisette="sleep" data-size="210"></div>
+        <div class="brand">Planque</div>
+        <h1>Tes photos,<br>bien planquées.</h1>
+        <p class="lead">Photos, vidéos et documents chiffrés sur ton iPhone.</p>
+        <div class="pill-row">
+          <span class="pill">Sans compte</span>
+          <span class="pill">Puce de sécurité</span>
+          <span class="pill">AES-256</span>
+        </div>
+      </div>
+      <button class="btn" data-go="how">Réveiller Noisette</button>
+    </section>
+
+    <!-- 2. Comment ça marche -->
+    <section class="screen" id="how">
+      <div class="center" style="justify-content:flex-start;padding-top:8px">
+        <div data-noisette="awake" data-size="110"></div>
+        <h2>Trois choses à savoir</h2>
+        <div class="how-list">
+          <div class="how">
+            <div class="how-ico" data-icon="key"></div>
+            <div><h3>Tes cachettes sont ta clé</h3><p>Tu caches des noisettes dans la forêt, dans un ordre secret. C’est cet ordre qui chiffre tes fichiers.</p></div>
+          </div>
+          <div class="how">
+            <div class="how-ico" data-icon="chip"></div>
+            <div><h3>Ta clé est soudée à ton iPhone</h3><p>Une partie vit dans la puce de sécurité de l’iPhone. Copier tes fichiers ailleurs ne sert à rien.</p></div>
+          </div>
+          <div class="how">
+            <div class="how-ico" data-icon="mask"></div>
+            <div><h3>Chaque parcours ouvre son coffre</h3><p>D’autres cachettes n’affichent pas d’erreur : elles ouvrent un autre coffre. Idéal pour un coffre leurre.</p></div>
+          </div>
+        </div>
+      </div>
+      <button class="btn" data-go="create">Choisir mes cachettes</button>
+    </section>
+
+    <!-- Forêt : création, verrouillage, confirmation, récupération -->
+    <section class="screen" id="secret" style="padding-left:14px;padding-right:14px">
+      <div class="secret-head">
+        <div data-noisette="sleep" data-size="68" id="secret-mascot"></div>
+        <div class="txt">
+          <h2 id="secret-title">Planque</h2>
+          <p class="sub" id="secret-sub"></p>
+          <div class="nuts" id="nuts"></div>
+        </div>
+      </div>
+      <div id="forest"></div>
+      <div class="bubble" id="bubble"></div>
+      <div class="secret-actions">
+        <button class="btn ghost" id="secret-clear">Effacer</button>
+        <button class="btn" id="secret-go">Ouvrir</button>
+      </div>
+      <button class="link-btn" id="secret-link"></button>
+    </section>
+
+    <!-- Phrase de récupération : affichage -->
+    <section class="screen" id="phrase">
+      <div class="scroll-body">
+        <div class="center" style="justify-content:flex-start;padding-top:4px">
+          <div data-noisette="awake" data-size="96"></div>
+          <h2>Ta phrase de secours</h2>
+          <p class="sub">Note ces 12 mots sur papier et range-les loin de ton iPhone. C’est le seul moyen de rouvrir ce coffre si tu oublies tes cachettes ou si tu changes d’iPhone.</p>
+          <div class="words" id="words"></div>
+          <div class="note" style="text-align:left">Elle ne s’affichera plus jamais. Pas de capture d’écran : elle finirait dans ta pellicule, ou dans iCloud.</div>
+        </div>
+      </div>
+      <button class="btn" id="phrase-done" style="margin-top:14px">Je l’ai notée</button>
+    </section>
+
+    <!-- Phrase de récupération : vérification -->
+    <section class="screen" id="quiz">
+      <div class="scroll-body">
+        <div class="center" style="justify-content:flex-start;padding-top:4px">
+          <div data-noisette="think" data-size="96"></div>
+          <h2>Petite vérification</h2>
+          <p class="sub">Pour vérifier que ta phrase est bien notée.</p>
+          <div class="quiz" id="quiz-body"></div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="quiz-ok" disabled>Valider</button>
+        <button class="btn ghost small" id="quiz-back">Revoir ma phrase</button>
+      </div>
+    </section>
+
+    <!-- Phrase de récupération : saisie -->
+    <section class="screen" id="recover">
+      <div class="scroll-body">
+        <div class="center" style="justify-content:flex-start;padding-top:4px">
+          <div data-noisette="awake" data-size="96"></div>
+          <h2>Phrase de secours</h2>
+          <p class="sub">Tape les 12 mots de ton coffre, dans l’ordre, séparés par des espaces. Les accents ne comptent pas.</p>
+          <textarea class="phrase-input" id="recover-input" autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="abeille balcon …"></textarea>
+          <div class="chips" id="recover-suggest" style="margin-top:10px;justify-content:center"></div>
+          <div class="hint" id="recover-hint"></div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="recover-go">Retrouver mon coffre</button>
+        <button class="btn ghost small" id="recover-back">Retour</button>
+      </div>
+    </section>
+
+    <!-- Face ID avant la forêt (optionnel) -->
+    <section class="screen" id="gate">
+      <div class="center">
+        <div data-noisette="sleep" data-size="150"></div>
+        <div class="brand" style="margin-top:6px">Planque</div>
+        <p class="sub">Verrouillée</p>
+      </div>
+      <button class="btn" id="gate-go"><span data-icon="faceid"></span>Déverrouiller</button>
+    </section>
+
+    <!-- Clé introuvable (nouvel iPhone, restauration) -->
+    <section class="screen" id="problem">
+      <div class="center">
+        <div data-noisette="sleep" data-size="140"></div>
+        <h2>Cet iPhone n’a pas la clé de tes coffres</h2>
+        <p class="sub">Ta clé est soudée à la puce de l’iPhone où tu as créé tes coffres. Si tu as changé d’iPhone ou restauré une sauvegarde, rouvre chaque coffre avec sa phrase de secours.</p>
+      </div>
+      <div class="actions">
+        <button class="btn" id="problem-recover">Utiliser une phrase de secours</button>
+        <button class="btn ghost small" id="retry">Réessayer</button>
+      </div>
+    </section>
+
+    <!-- Coffre -->
+    <section class="screen" id="vault">
+      <div class="gallery-scroll" id="scroll">
+        <div class="grid" id="grid"></div>
+      </div>
+      <div class="empty" id="empty">
+        <div data-noisette="awake" data-size="150" id="empty-mascot"></div>
+        <h2 style="margin-top:6px">Ta planque est vide</h2>
+        <p class="sub">Donne-moi tes photos, vidéos ou documents : je les chiffre et je les cache ici.</p>
+      </div>
+      <header class="vault-top">
+        <div class="vault-title">
+          <h2>Ma planque</h2>
+          <div class="count" id="count"></div>
+        </div>
+        <button class="text-btn" id="select-btn">Choisir</button>
+        <button class="icon-btn" id="settings-btn" aria-label="Réglages" data-icon="sliders"></button>
+        <button class="icon-btn" id="lock-btn" aria-label="Verrouiller" data-icon="lock"></button>
+      </header>
+      <button class="fab" id="fab"><span data-icon="plus"></span>Planquer</button>
+      <div class="selbar">
+        <button class="btn ghost" id="sel-share"><span data-icon="share"></span><span>Partager</span></button>
+        <button class="btn danger" id="sel-delete"><span data-icon="trash"></span><span>Supprimer</span></button>
+      </div>
+    </section>
+  </main>
+
+  <!-- Visionneuse photo -->
+  <div class="viewer" id="viewer">
+    <div class="stage" id="stage"><div class="spinner" id="viewer-spin"></div><img id="viewer-img" alt=""></div>
+    <div class="bar top">
+      <button class="icon-btn" id="viewer-close" aria-label="Fermer" data-icon="x"></button>
+      <div class="meta" id="viewer-meta"></div>
+      <div style="width:42px"></div>
+    </div>
+    <div class="bar bottom">
+      <button class="icon-btn" id="viewer-share" aria-label="Partager" data-icon="share"></button>
+      <button class="icon-btn" id="viewer-delete" aria-label="Supprimer" data-icon="trash"></button>
+    </div>
+  </div>
+
+  <!-- Import en cours -->
+  <div class="busy-overlay" id="busy">
+    <div data-noisette="stash" data-size="150"></div>
+    <p class="lead" id="busy-text">Je planque…</p>
+    <div class="progress"><i id="busy-bar"></i></div>
+  </div>
+
+  <div class="scrim" id="scrim"></div>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true"><div class="grab"></div><div id="sheet-body"></div></div>
+  <div class="toast" id="toast"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
