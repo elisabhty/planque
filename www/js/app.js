@@ -1,5 +1,5 @@
 import { Vault, haptic, isNative } from './vault.js';
-import { Forest, MIN_NUTS, strength } from './forest.js';
+import { Forest, MIN_NUTS, strength, forestSVG, miniSVG } from './forest.js';
 import { noisetteSVG, setNoisette, lookAt, resetLook } from './noisette.js';
 import { entropyToWords, wordsToEntropy, countKnown, suggest, choices } from './mnemonic.js';
 
@@ -39,6 +39,11 @@ function hydrate(root = document) {
   $$('[data-icon]', root).forEach((el) => {
     if (el.dataset.hydrated) return;
     el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon));
+    el.dataset.hydrated = '1';
+  });
+  $$('[data-mini]', root).forEach((el) => {
+    if (el.dataset.hydrated) return;
+    el.innerHTML = miniSVG(el.dataset.mini, el.dataset.v === '1' ? 1 : undefined);
     el.dataset.hydrated = '1';
   });
   $$('[data-noisette]', root).forEach((el) => {
@@ -137,6 +142,7 @@ function addedText(items) {
 const FACEID = 'plq.faceid';
 
 async function boot() {
+  $('#intro-forest').innerHTML = forestSVG();
   hydrate();
   if (!isNative) {
     document.body.insertAdjacentHTML('beforeend', '<div class="preview-banner">Aperçu navigateur — chiffrement simulé</div>');
@@ -192,7 +198,7 @@ async function gateAuth() {
 function go(id) {
   haptic('light');
   if (id === 'how') {
-    setNoisette($('#intro .intro-mascot'), 'happy');
+    setNoisette($('#intro .intro-noisette'), 'happy');
     setTimeout(() => show('how'), 650);
     return;
   }
@@ -210,11 +216,11 @@ function setHint(sel, text, warn = false) {
 // La forêt : verrouillage, création, confirmation, récupération
 // ---------------------------------------------------------------------------
 const MODES = {
-  lock: { title: 'Planque', sub: 'Cache tes noisettes dans le bon ordre.', go: 'Ouvrir', link: 'J’ai oublié mes cachettes', strength: false, mascot: 'sleep' },
+  lock: { title: 'Où sont tes noisettes ?', sub: 'Touche tes cachettes dans le bon ordre.', go: 'Ouvrir', link: 'J’ai oublié mes cachettes', strength: false, mascot: 'sleep' },
   create1: { title: 'Choisis tes cachettes', sub: 'Touche-les dans l’ordre, 6 ou plus. Une cachette peut servir deux fois.', go: 'Valider', link: '', strength: true, mascot: 'awake' },
   create2: { title: 'Encore une fois', sub: 'Refais le même parcours, dans le même ordre.', go: 'Confirmer', link: 'Recommencer', strength: false, mascot: 'awake' },
   confirm: { title: 'Nouveau coffre', sub: 'Refais le parcours qui a ouvert ce coffre pour le créer.', go: 'Créer le coffre', link: 'Annuler', strength: false, mascot: 'awake' },
-  recover1: { title: 'Nouvelles cachettes', sub: 'Coffre retrouvé ! Choisis le parcours qui l’ouvrira désormais.', go: 'Valider', link: 'Annuler', strength: true, mascot: 'awake' },
+  recover1: { title: 'Coffre retrouvé !', sub: 'Choisis le parcours qui l’ouvrira désormais.', go: 'Valider', link: 'Annuler', strength: true, mascot: 'happy' },
   recover2: { title: 'Encore une fois', sub: 'Refais le même parcours, dans le même ordre.', go: 'Confirmer', link: 'Recommencer', strength: false, mascot: 'awake' },
 };
 let forest;
@@ -254,16 +260,21 @@ function startSecret(mode, { keepFirst = false } = {}) {
   show('secret');
 }
 
+const NUT_ICON = (on) => `<svg viewBox="0 0 14 16" class="${on ? 'on' : 'off'}" aria-hidden="true">
+  <path d="M7 15c3.3 0 5.5-2.6 5.5-6S10.3 4.5 7 4.5 1.5 5.6 1.5 9 3.7 15 7 15z"/>
+  <path class="cap" d="M1.5 6.5C2 3 4.3 1.5 7 1.5s5 1.5 5.5 5C10.5 5.4 3.5 5.4 1.5 6.5z"/></svg>`;
+
 function setBubble(text, level = 0) {
   const b = $('#bubble');
   b.textContent = text;
-  b.className = `bubble l${level}`;
+  b.className = `reaction l${level}`;
 }
 
 function updateNuts() {
   const seq = forest.sequence;
   const n = seq.length;
-  $('#nuts').innerHTML = Array.from({ length: Math.max(MIN_NUTS, n) }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('');
+  $('#nuts').innerHTML = Array.from({ length: Math.max(MIN_NUTS, n) }, (_, i) => NUT_ICON(i < n)).join('');
+  $('#nuts').setAttribute('aria-label', `${n} noisette${n > 1 ? 's' : ''} cachée${n > 1 ? 's' : ''}`);
   $('#secret-go').disabled = n < MIN_NUTS;
   $('#secret-clear').disabled = n === 0;
   if (MODES[secret.mode].strength) {
@@ -469,7 +480,7 @@ let quizState = { idx: [], picks: {} };
 
 async function showPhrase(hex, then) {
   phraseState = { words: await entropyToWords(hex), then };
-  $('#words').innerHTML = phraseState.words.map((w) => `<span>${esc(w)}</span>`).join('');
+  $('#words').innerHTML = phraseState.words.map((w) => `<li>${esc(w)}</li>`).join('');
   show('phrase');
   $('#phrase .scroll-body').scrollTop = 0;
 }
@@ -700,7 +711,7 @@ function openImport() {
   haptic('light');
   openSheet(`
     <div class="row-mascot">
-      <div data-noisette="awake" data-size="72"></div>
+      <div data-noisette="awake" data-size="58"></div>
       <div class="txt"><h3>Qu’est-ce qu’on planque ?</h3></div>
     </div>
     <button class="opt" data-src="photos"><span class="ico">${icon('image')}</span><span><b>Photos et vidéos</b><small>Depuis ta pellicule</small></span></button>
@@ -756,7 +767,7 @@ function onProgress({ done, total }) {
 function askDeleteOriginals(n) {
   setTimeout(() => openSheet(`
     <div class="row-mascot">
-      <div data-noisette="awake" data-size="72"></div>
+      <div data-noisette="awake" data-size="58"></div>
       <div class="txt"><h3>Et les originaux ?</h3></div>
     </div>
     <p>${n > 1 ? `Ces ${n} fichiers sont` : 'Ce fichier est'} encore dans ta pellicule, visible par n’importe qui. Tu veux les supprimer de Photos ? iOS va te demander de confirmer.</p>
@@ -928,7 +939,7 @@ async function openSettings() {
   const bioName = bio.type === 'faceID' ? 'Face ID' : bio.type === 'touchID' ? 'Touch ID' : 'Code de l’iPhone';
   openSheet(`
     <div class="row-mascot">
-      <div data-noisette="awake" data-size="72"></div>
+      <div data-noisette="awake" data-size="58"></div>
       <div class="txt"><h3>Ce coffre</h3><p style="margin:0">${state.items.length ? `${addedText(state.items)} · ${fmtSize(size)}` : 'Vide pour l’instant'}</p></div>
     </div>
     <div class="setting">
@@ -1003,7 +1014,7 @@ function confirmNewPhrase() {
 function showDecoyInfo() {
   openSheet(`
     <div class="row-mascot">
-      <div data-noisette="awake" data-size="72"></div>
+      <div data-noisette="awake" data-size="58"></div>
       <div class="txt"><h3>Le coffre leurre</h3></div>
     </div>
     <p>Chaque parcours ouvre son propre coffre. Des cachettes inconnues n’affichent jamais d’erreur : elles ouvrent un coffre vide.</p>
@@ -1016,7 +1027,7 @@ function showDecoyInfo() {
 function showSecurityInfo() {
   openSheet(`
     <div class="row-mascot">
-      <div data-noisette="awake" data-size="72"></div>
+      <div data-noisette="awake" data-size="58"></div>
       <div class="txt"><h3>Ce que fait Planque</h3></div>
     </div>
     <p>Chaque fichier est chiffré en AES-256 sur ton iPhone dès son arrivée. Les noms, les dates et les miniatures aussi.</p>

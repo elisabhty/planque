@@ -170,10 +170,10 @@ function background() {
   return `
   <defs>
     <linearGradient id="fz-sky" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#1A2A23"/><stop offset=".55" stop-color="#132019"/><stop offset="1" stop-color="#0F1713"/>
+      <stop offset="0" stop-color="#1B2C29"/><stop offset=".55" stop-color="#172623"/><stop offset="1" stop-color="#14221F"/>
     </linearGradient>
     <linearGradient id="fz-ground" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#1D2D23"/><stop offset="1" stop-color="#121B16"/>
+      <stop offset="0" stop-color="#1D2E27"/><stop offset="1" stop-color="#13201E"/>
     </linearGradient>
     <radialGradient id="fz-moon"><stop offset="0" stop-color="#FFE2AA" stop-opacity=".35"/><stop offset="1" stop-color="#FFE2AA" stop-opacity="0"/></radialGradient>
     <radialGradient id="fz-glow"><stop offset="0" stop-color="#FFC777" stop-opacity=".55"/><stop offset="1" stop-color="#FFC777" stop-opacity="0"/></radialGradient>
@@ -181,8 +181,8 @@ function background() {
   </defs>
   <rect width="360" height="510" fill="url(#fz-sky)"/>
   ${stars}
-  <path d="M110 300 Q150 230 200 238 Q250 228 300 280 L300 340 L110 340 Z" fill="#16241D"/>
-  <g fill="#18271F">
+  <path d="M110 300 Q150 230 200 238 Q250 228 300 280 L300 340 L110 340 Z" fill="#182925"/>
+  <g fill="#1A2B26">
     <path d="M128 300 L146 222 L164 300 Z"/><path d="M168 300 L184 240 L200 300 Z"/>
     <path d="M232 296 L252 214 L272 296 Z"/><path d="M196 300 L208 256 L220 300 Z"/>
   </g>
@@ -215,6 +215,14 @@ function background() {
     <path d="M60 470 l-3 -8 M64 470 l1 -9 M68 470 l4 -7"/><path d="M250 506 l-3 -8 M254 506 l1 -9"/>
     <path d="M120 404 l-3 -7 M124 404 l2 -8"/><path d="M300 452 l-2 -8 M304 452 l3 -7"/>
   </g>`;
+}
+
+/** Petite illustration isolée (pour les explications). */
+export function miniSVG(type, v) {
+  const art = draw[type] ? draw[type](v) : '';
+  return `<svg viewBox="-26 -30 52 56" aria-hidden="true"><defs>
+    <radialGradient id="fz-glow"><stop offset="0" stop-color="#FFC777" stop-opacity=".55"/><stop offset="1" stop-color="#FFC777" stop-opacity="0"/></radialGradient></defs>
+    <g transform="${type === 'lantern' ? 'translate(0 8)' : ''}">${art}</g></svg>`;
 }
 
 export function forestSVG() {
