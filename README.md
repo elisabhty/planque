@@ -11,6 +11,9 @@ Photos, vidéos et documents chiffrés en AES-256 sur l'iPhone. La clé vient de
 - **La forêt** : 36 cachettes illustrées (trous du chêne, nichoir, lanterne, lune, terrier, botte…). Noisette se réveille, suit des yeux chaque noisette et juge la solidité du parcours. Même réaction pour tous les parcours.
 - **Phrase de secours** : 12 mots (BIP39, liste française), pour les cachettes oubliées et les changements d'iPhone. Saisie sans accents ni majuscules, avec suggestions.
 - **Face ID** (option) avant la forêt.
+- **Ne rien perdre** : sauvegarde chiffrée en un fichier `.planque` (à ranger dans Fichiers / iCloud Drive), restauration sur n'importe quel iPhone avec la phrase de secours, « Supprimés récemment » pendant 30 jours, remise dans Photos avec les fichiers d'origine, rappel de sauvegarde.
+- **Comme Photos** : dates de prise de vue d'origine, galerie groupée par mois, albums.
+- **Fouineurs et discrétion** : journal des dernières ouvertures du coffre, « Changer mes cachettes », verrouillage en retournant l'iPhone, icônes discrètes (Lune, Sapin).
 - **Coffre** : galerie (miniatures chiffrées, chargées à la demande), import depuis Photos, l'appareil photo (sans passer par la pellicule) et Fichiers, visionneuse photo (balayage, double-tap pour zoomer), lecture vidéo et aperçu de documents natifs, sélection multiple, partage, suppression.
 - **Après un import Photos** : proposition de supprimer les originaux de la pellicule (avec le rappel « Supprimés récemment »).
 - **Réglages du coffre** : créer un coffre leurre, explication de la protection, effacer le coffre.

@@ -6,7 +6,9 @@ export const isNative = !!(C && typeof C.isNativePlatform === 'function' && C.is
 
 const METHODS = ['status', 'unlock', 'confirmNew', 'lock', 'uncover', 'thumbs', 'photo', 'openItem',
   'importPhotos', 'importCamera', 'importFiles', 'deleteOriginals', 'share', 'remove', 'setSetting', 'destroy',
-  'recoverStart', 'recoverFinish', 'newRecovery', 'biometry', 'authenticate'];
+  'recoverStart', 'recoverFinish', 'newRecovery', 'biometry', 'authenticate',
+  'restore', 'createAlbum', 'renameAlbum', 'deleteAlbum', 'moveToAlbum', 'exportToPhotos',
+  'exportBackup', 'importBackup', 'setFaceDownLock', 'setIcon', 'getIcon', 'rekey'];
 
 function nativeVault() {
   const api = {};

@@ -122,7 +122,8 @@
       </div>
       <div class="actions">
         <button class="btn" id="recover-go">Retrouver mon coffre</button>
-        <button class="btn ghost small" id="recover-back">Retour</button>
+        <button class="btn ghost small" id="recover-file"><span data-icon="folder"></span>J’ai un fichier de sauvegarde</button>
+        <button class="link-btn" id="recover-back">Retour</button>
       </div>
     </section>
 
@@ -151,7 +152,9 @@
     <!-- Coffre -->
     <section class="screen" id="vault">
       <div class="gallery-scroll" id="scroll">
-        <div class="grid" id="grid"></div>
+        <div class="albums" id="albums" role="tablist" aria-label="Albums"></div>
+        <div id="banner"></div>
+        <div id="grid"></div>
         <p class="grid-foot" id="grid-foot"></p>
       </div>
       <div class="empty" id="empty">
@@ -169,10 +172,7 @@
         </div>
       </header>
       <button class="fab" id="fab"><span data-icon="plus"></span>Planquer</button>
-      <div class="selbar glass">
-        <button class="btn ghost" id="sel-share"><span data-icon="share"></span><span>Partager</span></button>
-        <button class="btn danger" id="sel-delete"><span data-icon="trash"></span><span>Supprimer</span></button>
-      </div>
+      <div class="selbar glass" id="selbar"></div>
     </section>
   </main>
 
@@ -186,6 +186,7 @@
     </div>
     <div class="bar bottom">
       <button class="icon-btn glass" id="viewer-share" aria-label="Partager" data-icon="share"></button>
+      <button class="icon-btn glass" id="viewer-save" aria-label="Remettre dans Photos" data-icon="download"></button>
       <button class="icon-btn glass" id="viewer-delete" aria-label="Supprimer" data-icon="trash"></button>
     </div>
   </div>

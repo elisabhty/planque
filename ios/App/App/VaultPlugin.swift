@@ -13,6 +13,7 @@ import QuickLook
 import ImageIO
 import PDFKit
 import LocalAuthentication
+import CoreMotion
 
 // =====================================================================
 //  Planque — coffre chiffré local
@@ -416,6 +417,9 @@ struct VaultItem: Codable {
     var height: Int?
     var duration: Double?
     var hasThumb: Bool = false
+    var taken: Double?        // date de prise de vue d'origine (ms), si connue
+    var album: String?        // id d'album
+    var deleted: Double?      // dans « Supprimés récemment » depuis (ms)
 
     var js: JSObject {
         var o: JSObject = ["id": id, "kind": kind, "name": name, "ext": ext,
@@ -423,14 +427,25 @@ struct VaultItem: Codable {
         if let width { o["width"] = width }
         if let height { o["height"] = height }
         if let duration { o["duration"] = duration }
+        if let taken { o["taken"] = taken }
+        if let album { o["album"] = album }
+        if let deleted { o["deleted"] = deleted }
         return o
     }
+}
+
+struct VaultAlbum: Codable {
+    var id: String
+    var name: String
+    var js: JSObject { ["id": id, "name": name] }
 }
 
 struct VaultIndex: Codable {
     var v = 1
     var items: [VaultItem] = []
     var settings: [String: String] = [:]
+    var albums: [VaultAlbum]?
+    var opens: [Double]?      // journal des ouvertures de ce coffre (chiffré avec lui)
 }
 
 private final class VaultSession {
@@ -518,7 +533,16 @@ private struct MediaInfo {
     var height: Int?
     var duration: Double?
     var thumb: Data?
+    var taken: Double?
 }
+
+private let exifFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.dateFormat = "yyyy:MM:dd HH:mm:ss"
+    f.timeZone = .current
+    return f
+}()
 
 private enum Media {
     static func inspect(_ src: Source, kind: String) -> MediaInfo {
@@ -560,6 +584,12 @@ private enum Media {
             let h = props[kCGImagePropertyPixelHeight] as? Int
             let o = props[kCGImagePropertyOrientation] as? Int ?? 1
             if o >= 5 { info.width = h; info.height = w } else { info.width = w; info.height = h }
+            let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any]
+            let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any]
+            if let str = (exif?[kCGImagePropertyExifDateTimeOriginal] as? String) ?? (tiff?[kCGImagePropertyTIFFDateTime] as? String),
+               let date = exifFormatter.date(from: str) {
+                info.taken = date.timeIntervalSince1970 * 1000
+            }
         }
         info.thumb = scaled(isrc, max: K.thumbMax, quality: 0.8)
         return info
@@ -570,6 +600,7 @@ private enum Media {
         let asset = AVURLAsset(url: url)
         let seconds = CMTimeGetSeconds(asset.duration)
         if seconds.isFinite { info.duration = seconds }
+        if let date = asset.creationDate?.dateValue { info.taken = date.timeIntervalSince1970 * 1000 }
         if let track = asset.tracks(withMediaType: .video).first {
             let size = track.naturalSize.applying(track.preferredTransform)
             info.width = Int(abs(size.width))
@@ -727,7 +758,19 @@ public class VaultPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "recoverFinish", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "newRecovery", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "biometry", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "authenticate", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "authenticate", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "restore", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "createAlbum", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "renameAlbum", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "deleteAlbum", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "moveToAlbum", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "exportToPhotos", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "exportBackup", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "importBackup", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setFaceDownLock", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setIcon", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getIcon", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "rekey", returnType: CAPPluginReturnPromise)
     ]
 
     /// Toute la cryptographie et l'état du coffre passent par cette file série.
@@ -735,6 +778,8 @@ public class VaultPlugin: CAPPlugin, CAPBridgedPlugin {
     private var session: VaultSession?          // file q uniquement
     private var lastAssetIds: [String] = []     // file q uniquement
     private var pendingRecovery: (dir: URL, master: SymmetricKey)? // file q uniquement
+    private let motion = CMMotionManager()                          // fil principal
+    private var faceDownSince: Date?                                 // fil principal
 
     // Fil principal uniquement
     private var cover: UIView?
@@ -842,7 +887,9 @@ public class VaultPlugin: CAPPlugin, CAPBridgedPlugin {
         for (k, v) in s.index.settings { settings[k] = v }
         return ["items": s.index.items.map { $0.js } as JSArray,
                 "isNew": !s.persisted,
-                "settings": settings]
+                "settings": settings,
+                "albums": (s.index.albums ?? []).map { $0.js } as JSArray,
+                "opens": (s.index.opens ?? []).reversed().map { $0 as JSValue } as JSArray]
     }
 
     /// Appelée sur la file q.
@@ -880,6 +927,7 @@ public class VaultPlugin: CAPPlugin, CAPBridgedPlugin {
         item.width = info.width
         item.height = info.height
         item.duration = info.duration
+        item.taken = info.taken
         if let thumb = info.thumb {
             try Blob.seal(data: thumb, id: id + ".t", key: s.master, to: s.thumbs.appendingPathComponent(id))
             item.hasThumb = true
@@ -913,7 +961,29 @@ public class VaultPlugin: CAPPlugin, CAPBridgedPlugin {
             let (device, salt) = try self.deviceContext(create: true)
             let s = VaultSession.open(try derive(secret, salt: salt, device: device))
             self.session = s
+            if s.persisted { try? self.recordOpening(s) }
             return self.snapshot(s)
+        }
+    }
+
+    /// Note l'ouverture dans le journal du coffre et vide la corbeille de plus de 30 jours.
+    private func recordOpening(_ s: VaultSession) throws {
+        let now = Date().timeIntervalSince1970 * 1000
+        var opens = s.index.opens ?? []
+        opens.append(now)
+        if opens.count > 30 { opens.removeFirst(opens.count - 30) }
+        s.index.opens = opens
+        let expired = s.index.items.filter { ($0.deleted ?? now) < now - 30 * 86_400_000 }.map { $0.id }
+        if !expired.isEmpty { purge(Set(expired), in: s) }
+        try s.saveIndex()
+    }
+
+    /// Efface définitivement des éléments (fichiers chiffrés et miniatures). File q.
+    private func purge(_ ids: Set<String>, in s: VaultSession) {
+        s.index.items.removeAll { ids.contains($0.id) }
+        for id in ids {
+            try? FileManager.default.removeItem(at: s.blobs.appendingPathComponent(id))
+            try? FileManager.default.removeItem(at: s.thumbs.appendingPathComponent(id))
         }
     }
 
@@ -1306,17 +1376,361 @@ public class VaultPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Par défaut, met dans « Supprimés récemment » (30 jours). Avec forever, efface tout de suite.
     @objc func remove(_ call: CAPPluginCall) {
+        let wanted = Set(ids(call))
+        let forever = call.getBool("forever") ?? false
+        run(call) {
+            let s = try self.requirePersisted()
+            if forever {
+                s.index.items.removeAll { wanted.contains($0.id) }
+                try s.saveIndex()
+                for id in wanted {
+                    try? FileManager.default.removeItem(at: s.blobs.appendingPathComponent(id))
+                    try? FileManager.default.removeItem(at: s.thumbs.appendingPathComponent(id))
+                }
+            } else {
+                let now = Date().timeIntervalSince1970 * 1000
+                for i in s.index.items.indices where wanted.contains(s.index.items[i].id) { s.index.items[i].deleted = now }
+                try s.saveIndex()
+            }
+            return ["items": s.index.items.map { $0.js } as JSArray]
+        }
+    }
+
+    @objc func restore(_ call: CAPPluginCall) {
         let wanted = Set(ids(call))
         run(call) {
             let s = try self.requirePersisted()
-            s.index.items.removeAll { wanted.contains($0.id) }
+            for i in s.index.items.indices where wanted.contains(s.index.items[i].id) { s.index.items[i].deleted = nil }
             try s.saveIndex()
-            for id in wanted {
-                try? FileManager.default.removeItem(at: s.blobs.appendingPathComponent(id))
-                try? FileManager.default.removeItem(at: s.thumbs.appendingPathComponent(id))
-            }
             return ["items": s.index.items.map { $0.js } as JSArray]
+        }
+    }
+
+    /// Remplace les cachettes du coffre ouvert (l'ancien parcours n'ouvre plus rien).
+    @objc func rekey(_ call: CAPPluginCall) {
+        let secret: [Int]
+        do { secret = try nuts(call) } catch { fail(call, error); return }
+        run(call) {
+            let s = try self.requirePersisted()
+            let (device, salt) = try self.deviceContext(create: false)
+            let d = try derive(secret, salt: salt, device: device)
+            if d.vaultId == s.vaultId { return self.snapshot(s) }
+            let fm = FileManager.default
+            let target = Paths.vaults.appendingPathComponent(d.vaultId, isDirectory: true)
+            if fm.fileExists(atPath: target.path) {
+                throw VaultError.io("Ces cachettes ouvrent déjà un autre coffre. Choisis-en d’autres.")
+            }
+            let raw = s.master.withUnsafeBytes { Data($0) }
+            try writeProtected(try Small.seal(raw, key: d.kek, aad: "plq-key|\(d.vaultId)"), to: s.keyFile)
+            try fm.moveItem(at: s.dir, to: target)
+            let ns = VaultSession.open(d)
+            guard ns.persisted else { throw VaultError.corrupted }
+            self.session = ns
+            return self.snapshot(ns)
+        }
+    }
+
+    // MARK: Albums
+
+    @objc func createAlbum(_ call: CAPPluginCall) {
+        let name = (call.getString("name") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        run(call) {
+            let s = try self.requirePersisted()
+            guard !name.isEmpty else { throw VaultError.io("Donne un nom à l’album.") }
+            let album = VaultAlbum(id: UUID().uuidString.lowercased(), name: String(name.prefix(40)))
+            s.index.albums = (s.index.albums ?? []) + [album]
+            try s.saveIndex()
+            return ["album": album.js, "albums": (s.index.albums ?? []).map { $0.js } as JSArray]
+        }
+    }
+
+    @objc func renameAlbum(_ call: CAPPluginCall) {
+        let id = call.getString("id") ?? ""
+        let name = (call.getString("name") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        run(call) {
+            let s = try self.requirePersisted()
+            guard !name.isEmpty else { throw VaultError.io("Donne un nom à l’album.") }
+            var albums = s.index.albums ?? []
+            if let i = albums.firstIndex(where: { $0.id == id }) { albums[i].name = String(name.prefix(40)) }
+            s.index.albums = albums
+            try s.saveIndex()
+            return ["albums": albums.map { $0.js } as JSArray]
+        }
+    }
+
+    /// Supprime l'album, pas son contenu : les éléments retournent dans « Tout ».
+    @objc func deleteAlbum(_ call: CAPPluginCall) {
+        let id = call.getString("id") ?? ""
+        run(call) {
+            let s = try self.requirePersisted()
+            s.index.albums = (s.index.albums ?? []).filter { $0.id != id }
+            for i in s.index.items.indices where s.index.items[i].album == id { s.index.items[i].album = nil }
+            try s.saveIndex()
+            return ["albums": (s.index.albums ?? []).map { $0.js } as JSArray,
+                    "items": s.index.items.map { $0.js } as JSArray]
+        }
+    }
+
+    @objc func moveToAlbum(_ call: CAPPluginCall) {
+        let wanted = Set(ids(call))
+        let album = call.getString("album")
+        run(call) {
+            let s = try self.requirePersisted()
+            let target = (album?.isEmpty ?? true) ? nil : album
+            for i in s.index.items.indices where wanted.contains(s.index.items[i].id) { s.index.items[i].album = target }
+            try s.saveIndex()
+            return ["items": s.index.items.map { $0.js } as JSArray]
+        }
+    }
+
+    // MARK: Sortir du coffre : Photos, sauvegarde chiffrée
+
+    /// Remet des photos et vidéos dans la pellicule, fichiers d'origine (dates et métadonnées conservées).
+    @objc func exportToPhotos(_ call: CAPPluginCall) {
+        let wanted = ids(call)
+        q.async {
+            do {
+                let s = try self.requireSession()
+                let dir = Paths.scratch.appendingPathComponent(UUID().uuidString, isDirectory: true)
+                try Paths.ensure(dir)
+                var files: [(URL, Bool)] = []
+                var skipped = 0
+                for (i, id) in wanted.enumerated() {
+                    guard let item = s.item(id) else { continue }
+                    guard item.kind == "photo" || item.kind == "video" else { skipped += 1; continue }
+                    let sub = dir.appendingPathComponent("\(i)", isDirectory: true)
+                    try Paths.ensure(sub)
+                    let url = sub.appendingPathComponent(self.fileName(item))
+                    try Blob.openFile(s.blobs.appendingPathComponent(id), id: id, key: s.master, to: url)
+                    files.append((url, item.kind == "video"))
+                }
+                let cleanup = { self.q.async { try? FileManager.default.removeItem(at: dir) } }
+                guard !files.isEmpty else { cleanup(); call.resolve(["saved": 0, "skipped": skipped]); return }
+                PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+                    guard status == .authorized || status == .limited else {
+                        cleanup()
+                        call.resolve(["saved": 0, "skipped": skipped, "denied": true])
+                        return
+                    }
+                    PHPhotoLibrary.shared().performChanges({
+                        for (url, isVideo) in files {
+                            if isVideo { _ = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url) }
+                            else { _ = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url) }
+                        }
+                    }) { ok, _ in
+                        cleanup()
+                        call.resolve(["saved": ok ? files.count : 0, "skipped": skipped])
+                    }
+                }
+            } catch {
+                self.fail(call, error)
+            }
+        }
+    }
+
+    private static let backupMagic = Data("PLQBAK1\n".utf8)
+
+    /// Fichier unique, entièrement chiffré, à ranger dans Fichiers / iCloud Drive / un ordinateur.
+    /// Il se rouvre sur n'importe quel iPhone avec la phrase de secours du coffre.
+    @objc func exportBackup(_ call: CAPPluginCall) {
+        q.async {
+            do {
+                let s = try self.requirePersisted()
+                let fm = FileManager.default
+                var entries = ["key.bin", "rec.bin", "rid", "index.bin"].filter { fm.fileExists(atPath: s.dir.appendingPathComponent($0).path) }
+                for sub in ["b", "t"] {
+                    let names = (try? fm.contentsOfDirectory(atPath: s.dir.appendingPathComponent(sub).path)) ?? []
+                    entries += names.sorted().map { "\(sub)/\($0)" }
+                }
+                let list: [[String: Any]] = try entries.map { e -> [String: Any] in
+                    ["p": e, "n": try fileSize(s.dir.appendingPathComponent(e))]
+                }
+                let manifest: [String: Any] = ["v": 1, "files": list]
+                let mdata = try JSONSerialization.data(withJSONObject: manifest)
+                let day = DateFormatter()
+                day.locale = Locale(identifier: "fr_FR")
+                day.dateFormat = "yyyy-MM-dd"
+                let dir = Paths.scratch.appendingPathComponent(UUID().uuidString, isDirectory: true)
+                try Paths.ensure(dir)
+                let out = dir.appendingPathComponent("Planque-\(day.string(from: Date())).planque")
+                guard fm.createFile(atPath: out.path, contents: nil, attributes: [.protectionKey: FileProtectionType.complete]) else {
+                    throw VaultError.io("Écriture impossible.")
+                }
+                let h = try FileHandle(forWritingTo: out)
+                do {
+                    var header = VaultPlugin.backupMagic
+                    withUnsafeBytes(of: UInt32(mdata.count).bigEndian) { header.append(contentsOf: $0) }
+                    header.append(mdata)
+                    try h.write(contentsOf: header)
+                    for e in entries {
+                        let r = try FileHandle(forReadingFrom: s.dir.appendingPathComponent(e))
+                        defer { try? r.close() }
+                        while let chunk = try r.read(upToCount: K.chunk), !chunk.isEmpty { try h.write(contentsOf: chunk) }
+                    }
+                    try h.close()
+                } catch {
+                    try? h.close()
+                    throw error
+                }
+                let vaultId = s.vaultId
+                DispatchQueue.main.async {
+                    guard let vc = self.bridge?.viewController else { return }
+                    let sheet = UIActivityViewController(activityItems: [out], applicationActivities: nil)
+                    sheet.completionWithItemsHandler = { [weak self] _, completed, _, _ in
+                        guard let self = self else { return }
+                        self.q.asyncAfter(deadline: .now() + 5) { try? FileManager.default.removeItem(at: dir) }
+                        let now = Date().timeIntervalSince1970 * 1000
+                        self.q.async {
+                            if completed, let cur = self.session, cur.vaultId == vaultId {
+                                cur.index.settings["lastBackup"] = String(Int(now))
+                                try? cur.saveIndex()
+                            }
+                        }
+                        self.endUI(call, ["done": completed, "at": completed ? now : 0])
+                    }
+                    sheet.popoverPresentationController?.sourceView = vc.view
+                    self.beginUI(call)
+                    vc.present(sheet, animated: true)
+                }
+            } catch {
+                self.fail(call, error)
+            }
+        }
+    }
+
+    /// Choisit un fichier .planque et le dépose sur cet iPhone ; on le rouvre ensuite avec la phrase de secours.
+    @objc func importBackup(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            let picker = UIDocumentPickerViewController(forOpeningContentTypes: [UTType.data], asCopy: true)
+            picker.allowsMultipleSelection = false
+            let delegate = DocPickerDelegate { [weak self] urls in
+                guard let self = self else { return }
+                self.docDelegate = nil
+                guard let url = urls.first else { self.endUI(call, ["imported": false]); return }
+                self.q.async {
+                    do {
+                        let already = try self.unpackBackup(url)
+                        try? FileManager.default.removeItem(at: url)
+                        self.endUI(call, ["imported": true, "already": already])
+                    } catch {
+                        try? FileManager.default.removeItem(at: url)
+                        let msg = (error as? VaultError)?.localizedDescription ?? "Ce fichier n’est pas une sauvegarde Planque."
+                        self.endUI(call, ["imported": false, "error": msg])
+                    }
+                }
+            }
+            self.docDelegate = delegate
+            picker.delegate = delegate
+            self.beginUI(call)
+            self.bridge?.viewController?.present(picker, animated: true)
+        }
+    }
+
+    /// File q. Renvoie true si ce coffre est déjà sur cet iPhone (rien n'est ajouté).
+    private func unpackBackup(_ url: URL) throws -> Bool {
+        let bad = VaultError.io("Ce fichier n’est pas une sauvegarde Planque, ou il est abîmé.")
+        let fm = FileManager.default
+        let h = try FileHandle(forReadingFrom: url)
+        defer { try? h.close() }
+        guard let magic = try h.read(upToCount: 8), magic == VaultPlugin.backupMagic,
+              let lenData = try h.read(upToCount: 4), lenData.count == 4 else { throw bad }
+        let lb = [UInt8](lenData)
+        let len = Int(lb[0]) << 24 | Int(lb[1]) << 16 | Int(lb[2]) << 8 | Int(lb[3])
+        guard len > 0, len < 50_000_000, let mdata = try h.read(upToCount: len), mdata.count == len,
+              let manifest = try? JSONSerialization.jsonObject(with: mdata) as? [String: Any],
+              let files = manifest["files"] as? [[String: Any]], !files.isEmpty else { throw bad }
+        let allowed = try NSRegularExpression(pattern: "^(key\\.bin|rec\\.bin|rid|index\\.bin|[bt]/[0-9a-f-]{36}(\\.t)?)$")
+        try Paths.ensure(Paths.vaults)
+        let tmp = Paths.vaults.appendingPathComponent(try randomBytes(16).hex, isDirectory: true)
+        do {
+            try Paths.ensure(tmp.appendingPathComponent("b", isDirectory: true))
+            try Paths.ensure(tmp.appendingPathComponent("t", isDirectory: true))
+            for f in files {
+                guard let p = f["p"] as? String, let n = (f["n"] as? NSNumber)?.intValue, n >= 0,
+                      allowed.firstMatch(in: p, range: NSRange(p.startIndex..., in: p)) != nil else { throw bad }
+                let dst = tmp.appendingPathComponent(p)
+                guard fm.createFile(atPath: dst.path, contents: nil, attributes: [.protectionKey: FileProtectionType.complete]) else { throw bad }
+                let w = try FileHandle(forWritingTo: dst)
+                defer { try? w.close() }
+                var left = n
+                while left > 0 {
+                    guard let chunk = try h.read(upToCount: min(K.chunk, left)), !chunk.isEmpty else { throw bad }
+                    try w.write(contentsOf: chunk)
+                    left -= chunk.count
+                }
+            }
+            guard let ridData = try? Data(contentsOf: tmp.appendingPathComponent("rid")),
+                  fm.fileExists(atPath: tmp.appendingPathComponent("rec.bin").path) else { throw bad }
+            let dirs = (try? fm.contentsOfDirectory(at: Paths.vaults, includingPropertiesForKeys: nil)) ?? []
+            for d in dirs where d.lastPathComponent != tmp.lastPathComponent {
+                if let other = try? Data(contentsOf: d.appendingPathComponent("rid")), other == ridData {
+                    try? fm.removeItem(at: tmp)
+                    return true
+                }
+            }
+            return false
+        } catch {
+            try? fm.removeItem(at: tmp)
+            throw error
+        }
+    }
+
+    // MARK: Discrétion : verrouiller en retournant l'iPhone, icône
+
+    @objc func setFaceDownLock(_ call: CAPPluginCall) {
+        let on = call.getBool("on") ?? false
+        DispatchQueue.main.async {
+            if on { self.startFaceDown() } else { self.motion.stopDeviceMotionUpdates() }
+            call.resolve()
+        }
+    }
+
+    private func startFaceDown() {
+        guard motion.isDeviceMotionAvailable, !motion.isDeviceMotionActive else { return }
+        motion.deviceMotionUpdateInterval = 0.2
+        motion.startDeviceMotionUpdates(to: .main) { [weak self] m, _ in
+            guard let self = self, let g = m?.gravity else { return }
+            if g.z > 0.85 {
+                if let since = self.faceDownSince {
+                    if Date().timeIntervalSince(since) > 0.4 {
+                        self.faceDownSince = nil
+                        self.lockFromFaceDown()
+                    }
+                } else {
+                    self.faceDownSince = Date()
+                }
+            } else {
+                self.faceDownSince = nil
+            }
+        }
+    }
+
+    private func lockFromFaceDown() {
+        q.async {
+            guard self.session != nil else { return }
+            self.wipeSession()
+            DispatchQueue.main.async {
+                self.dismissEverything()
+                self.notifyListeners("locked", data: ["reason": "faceDown"])
+            }
+        }
+    }
+
+    @objc func setIcon(_ call: CAPPluginCall) {
+        let name = call.getString("name")
+        DispatchQueue.main.async {
+            guard UIApplication.shared.supportsAlternateIcons else { call.resolve(["ok": false]); return }
+            let target = (name == nil || name == "default") ? nil : name
+            UIApplication.shared.setAlternateIconName(target) { err in call.resolve(["ok": err == nil]) }
+        }
+    }
+
+    @objc func getIcon(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            call.resolve(["name": UIApplication.shared.alternateIconName ?? "default",
+                          "supported": UIApplication.shared.supportsAlternateIcons])
         }
     }
 

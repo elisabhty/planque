@@ -42,6 +42,13 @@ Ce document décrit ce que fait vraiment le code (`ios/App/App/VaultPlugin.swift
 
 Aucune cryptographie maison : CryptoKit (AES-GCM, ECDH P-256, HKDF, SHA-256, Secure Enclave), CommonCrypto (PBKDF2), Security (trousseau, aléa).
 
+## Ne jamais perdre ses photos
+
+- **Sauvegarde chiffrée** (fichier `.planque`) : copie telle quelle des fichiers chiffrés du coffre (clé enveloppée, phrase enveloppée, index, fichiers, miniatures), précédée d'un manifeste qui ne contient que des noms techniques (UUID) et des tailles. Aucun nom de photo, aucune date ni aucun album en clair. Le fichier se range où l'on veut (Fichiers, iCloud Drive, ordinateur) et ne s'ouvre qu'avec la **phrase de secours** (128 bits), sur n'importe quel iPhone. À la restauration, chaque chemin est vérifié (pas de sortie du dossier du coffre) et un coffre déjà présent n'est pas dupliqué.
+- **Supprimés récemment** : un élément supprimé reste 30 jours dans le coffre, chiffré, avant d'être effacé à l'ouverture suivante. « Supprimer définitivement » et « Effacer ce coffre » ne passent pas par là.
+- **Remettre dans Photos** : export des fichiers d'origine (dates et métadonnées conservées), après autorisation « ajout seulement » de Photos.
+- **Rappel** dans la galerie quand il y a au moins 5 éléments et pas de sauvegarde depuis 30 jours (on peut le repousser de 7 jours).
+
 ## Coffres multiples et leurre
 
 - Chaque parcours mène à son propre dossier. Un parcours inconnu ouvre un coffre **vide en mémoire**, sans erreur. Il n'est écrit sur le disque qu'au premier import, après un deuxième passage du même parcours.
@@ -51,6 +58,9 @@ Aucune cryptographie maison : CryptoKit (AES-GCM, ECDH P-256, HKDF, SHA-256, Sec
 
 - Verrouillage dès que l'appli passe en arrière-plan : session et clés effacées, fichiers temporaires supprimés, fenêtres natives fermées.
 - Cache opaque dans le sélecteur d'applis ; en version publiée (Release), aussi pendant un enregistrement ou un partage d'écran.
+- **Verrouiller en retournant l'iPhone** (option) : écran posé contre la table, le coffre se ferme (accéléromètre, aucune autorisation demandée).
+- **Journal des ouvertures** : les 30 dernières ouvertures de **ce** coffre, stockées dans son index chiffré (invisible depuis les autres coffres). Une ouverture inconnue signale que quelqu'un connaît le parcours ; **Changer mes cachettes** ré-enveloppe alors la clé maîtresse avec un nouveau parcours (l'ancien n'ouvre plus rien, les fichiers ne sont pas rechiffrés).
+- **Icônes discrètes** (Lune, Sapin) via les icônes alternatives d'iOS. Le nom « Planque » reste affiché : iOS ne permet pas de le changer.
 - **Face ID / code de l'iPhone** (option) : verrou d'accès **en plus** des cachettes, avant d'afficher la forêt. Il n'entre pas dans la clé : c'est un garde, pas une partie du chiffrement.
 - À la saisie, une noisette apparaît brièvement sur la cachette touchée, sans laisser de trace du parcours (contrairement à un schéma dessiné).
 - L'import depuis Photos chiffre le fichier fourni par iOS sans copie en clair. Les vidéos et les documents ouverts sont déchiffrés dans un dossier temporaire protégé, effacé à la fermeture ou au verrouillage.
@@ -60,6 +70,7 @@ Aucune cryptographie maison : CryptoKit (AES-GCM, ECDH P-256, HKDF, SHA-256, Sec
 - **Appareil compromis ou coffre ouvert** : ce que l'utilisateur voit, un logiciel malveillant ou une personne qui tient l'iPhone ouvert peut le voir. Les clés sont en mémoire tant que le coffre est ouvert.
 - **Regard par-dessus l'épaule** : quelqu'un qui filme ou regarde la saisie peut retenir le parcours.
 - **Essais sur l'iPhone lui-même** : pas de blocage après X essais (ce serait un indice pour le leurre). Chaque essai coûte environ une demi-seconde à une seconde de calcul, plus le passage par la puce. Un parcours de 6 noisettes ou plus rend cette attaque irréaliste ; un parcours de 5 noisettes simples reste le point faible.
+- **Date de modification de l'index** : chaque ouverture réécrit l'index du coffre (journal). Une expertise du conteneur peut donc voir quel dossier de coffre a servi récemment.
 - **Analyse technique du conteneur** : le nombre de coffres, leur taille et le nombre de fichiers chiffrés sont visibles par quelqu'un qui extrait les fichiers de l'appli. Le leurre résiste à la contrainte humaine (« ouvre l'appli »), pas à une expertise judiciaire.
 - **Cachettes ET phrase perdues = données perdues.** Personne ne peut les récupérer, nous compris.
 - **Changement d'iPhone** : il faut la phrase de chaque coffre.
