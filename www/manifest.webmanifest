@@ -3,8 +3,8 @@
   "short_name": "Planque",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#0E1311",
-  "theme_color": "#0E1311",
+  "background_color": "#000000",
+  "theme_color": "#000000",
   "icons": [
     {
       "src": "img/icon-192.png",

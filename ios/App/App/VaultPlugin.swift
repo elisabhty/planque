@@ -1357,7 +1357,7 @@ public class VaultPlugin: CAPPlugin, CAPBridgedPlugin {
     private func showCover() {
         guard cover == nil, let window = bridge?.viewController?.view.window else { return }
         let v = UIView(frame: window.bounds)
-        v.backgroundColor = UIColor(red: 14 / 255, green: 19 / 255, blue: 17 / 255, alpha: 1)
+        v.backgroundColor = .black
         v.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         if let logo = UIImage(named: "CoverLogo") {
             let iv = UIImageView(image: logo)

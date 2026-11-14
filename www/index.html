@@ -9,10 +9,9 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Planque">
-  <meta name="theme-color" content="#13201E">
+  <meta name="theme-color" content="#000000">
   <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="preload" href="fonts/alegreya.woff2" as="font" type="font/woff2" crossorigin>
   <title>Planque</title>
   <link rel="stylesheet" href="css/app.css">
 </head>
@@ -20,46 +19,48 @@
   <div class="ambient"></div>
   <main id="app">
 
-    <!-- Bienvenue : la forêt endormie -->
+    <!-- Accueil -->
     <section class="screen" id="intro">
-      <div class="intro-art" aria-hidden="true">
-        <div id="intro-forest" style="width:100%;height:100%"></div>
-      </div>
+      <div class="intro-art" aria-hidden="true"><div id="intro-forest"></div></div>
       <div class="intro-copy">
-        <div class="intro-noisette" data-noisette="sleep" data-size="128"></div>
-        <h1>Tes photos, bien planquées.</h1>
-        <p class="lead">Un coffre chiffré sur ton iPhone, gardé par Noisette. Pas de compte, pas de serveur.</p>
+        <div class="intro-noisette" data-noisette="sleep" data-size="124"></div>
+        <h1>Planque</h1>
+        <p class="lead">Tes photos et tes fichiers, chiffrés sur ton iPhone et gardés par Noisette.</p>
       </div>
-      <button class="btn" data-go="how">Réveiller Noisette</button>
+      <button class="btn" data-go="how">Commencer</button>
     </section>
 
-    <!-- Comment ça marche -->
+    <!-- Bienvenue dans Planque -->
     <section class="screen" id="how">
       <div class="scroll-body">
-        <div class="how-top" data-noisette="awake" data-size="84"></div>
-        <h2>Comment Noisette garde tes photos</h2>
-        <ul class="facts">
+        <h1 class="welcome">Bienvenue dans Planque</h1>
+        <ul class="features">
           <li>
-            <span class="fact-art" data-mini="hole"></span>
-            <div><h3>Tes cachettes sont ta clé</h3><p>Tu caches des noisettes dans la forêt, dans un ordre secret. C’est cet ordre qui chiffre tes fichiers.</p></div>
+            <span class="f-ico" data-icon="key"></span>
+            <div><b>Tes cachettes sont ta clé</b><p>Tu caches des noisettes dans une forêt, dans un ordre secret. Cet ordre chiffre tes fichiers.</p></div>
           </li>
           <li>
-            <span class="fact-art" data-mini="lantern"></span>
-            <div><h3>Ta clé reste dans ton iPhone</h3><p>Une partie vit dans sa puce de sécurité et ne peut pas en sortir. Copier tes fichiers ailleurs ne sert à rien.</p></div>
+            <span class="f-ico" data-icon="chip"></span>
+            <div><b>Liée à ton iPhone</b><p>Une partie de la clé reste dans la puce de sécurité. Copier tes fichiers ailleurs ne sert à rien.</p></div>
           </li>
           <li>
-            <span class="fact-art" data-mini="mushroom" data-v="1"></span>
-            <div><h3>Chaque parcours ouvre son coffre</h3><p>D’autres cachettes n’affichent pas d’erreur : elles ouvrent un autre coffre. Idéal pour un coffre leurre.</p></div>
+            <span class="f-ico" data-icon="mask"></span>
+            <div><b>Un coffre leurre</b><p>D’autres cachettes ouvrent un autre coffre, sans erreur. Si on te force à ouvrir l’appli, tu montres celui-là.</p></div>
+          </li>
+          <li>
+            <span class="f-ico" data-icon="phrase"></span>
+            <div><b>Une phrase de secours</b><p>12 mots à recopier, pour retrouver ton coffre si tu oublies tes cachettes ou si tu changes d’iPhone.</p></div>
           </li>
         </ul>
       </div>
-      <button class="btn" data-go="create" style="margin-top:14px">Choisir mes cachettes</button>
+      <p class="fine">Pas de compte, pas de serveur. Personne d’autre que toi ne peut ouvrir tes coffres.</p>
+      <button class="btn" data-go="create">Continuer</button>
     </section>
 
     <!-- La forêt : création, verrouillage, confirmation, récupération -->
     <section class="screen" id="secret">
-      <header class="secret-head">
-        <div class="secret-mascot" data-noisette="sleep" data-size="66" id="secret-mascot"></div>
+      <header class="secret-head glass">
+        <div class="secret-mascot" data-noisette="sleep" data-size="58" id="secret-mascot"></div>
         <div class="speech" aria-live="polite">
           <h2 id="secret-title"></h2>
           <p id="secret-sub"></p>
@@ -67,7 +68,7 @@
         </div>
       </header>
       <div id="forest"></div>
-      <footer class="secret-foot">
+      <footer class="secret-foot glass">
         <div class="foot-row">
           <div class="nuts" id="nuts" aria-label="Noisettes cachées"></div>
           <button class="text-btn" id="secret-clear">Effacer</button>
@@ -81,24 +82,23 @@
     <section class="screen" id="phrase">
       <div class="scroll-body">
         <div class="phrase-head">
-          <div data-noisette="awake" data-size="70"></div>
-          <div>
-            <h2>Ta phrase de secours</h2>
-            <p class="sub">Recopie ces 12 mots sur papier. C’est le seul moyen de rouvrir ce coffre si tu oublies tes cachettes ou si tu changes d’iPhone.</p>
-          </div>
+          <div data-noisette="awake" data-size="84"></div>
+          <h2>Ta phrase de secours</h2>
+          <p class="sub">Recopie ces 12 mots sur papier. C’est le seul moyen de rouvrir ce coffre si tu oublies tes cachettes ou si tu changes d’iPhone.</p>
         </div>
         <ol class="paper" id="words"></ol>
-        <p class="paper-note">Elle ne s’affichera plus. Pas de capture d’écran : elle finirait dans ta pellicule, et sans doute dans iCloud.</p>
+        <p class="paper-note">Elle ne s’affichera plus. Évite la capture d’écran : elle finirait dans ta pellicule, et sans doute dans iCloud.</p>
       </div>
-      <button class="btn" id="phrase-done" style="margin-top:14px">Je l’ai recopiée</button>
+      <button class="btn" id="phrase-done" style="margin-top:12px">Je l’ai recopiée</button>
     </section>
 
     <!-- Phrase de secours : vérification -->
     <section class="screen" id="quiz">
       <div class="scroll-body">
         <div class="phrase-head">
-          <div data-noisette="think" data-size="70"></div>
-          <div><h2>On vérifie</h2><p class="sub">Choisis les bons mots de ta phrase.</p></div>
+          <div data-noisette="think" data-size="84"></div>
+          <h2>On vérifie</h2>
+          <p class="sub">Choisis les bons mots de ta phrase.</p>
         </div>
         <div class="quiz" id="quiz-body"></div>
       </div>
@@ -112,8 +112,9 @@
     <section class="screen" id="recover">
       <div class="scroll-body">
         <div class="phrase-head">
-          <div data-noisette="awake" data-size="70"></div>
-          <div><h2>Phrase de secours</h2><p class="sub">Tape les 12 mots de ton coffre, dans l’ordre. Les accents et les majuscules ne comptent pas.</p></div>
+          <div data-noisette="awake" data-size="84"></div>
+          <h2>Phrase de secours</h2>
+          <p class="sub">Tape les 12 mots de ton coffre, dans l’ordre. Les accents et les majuscules ne comptent pas.</p>
         </div>
         <textarea class="phrase-input" id="recover-input" autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="abeille balcon …"></textarea>
         <div class="chips" id="recover-suggest" style="margin-top:10px"></div>
@@ -129,8 +130,7 @@
     <section class="screen" id="gate">
       <div class="center">
         <div data-noisette="sleep" data-size="150"></div>
-        <h2 style="margin-top:10px">Planque</h2>
-        <p class="sub">Verrouillée</p>
+        <h2 style="margin-top:10px">Planque est verrouillée</h2>
       </div>
       <button class="btn" id="gate-go"><span data-icon="faceid"></span>Déverrouiller</button>
     </section>
@@ -152,6 +152,7 @@
     <section class="screen" id="vault">
       <div class="gallery-scroll" id="scroll">
         <div class="grid" id="grid"></div>
+        <p class="grid-foot" id="grid-foot"></p>
       </div>
       <div class="empty" id="empty">
         <div data-noisette="awake" data-size="150" id="empty-mascot"></div>
@@ -159,16 +160,16 @@
         <p class="sub">Donne-moi tes photos, vidéos ou documents : je les chiffre et je les cache ici.</p>
       </div>
       <header class="vault-top">
-        <div class="vault-title">
-          <h2>Ma planque</h2>
-          <div class="count" id="count"></div>
+        <div class="vault-title"><h2>Ma planque</h2><div class="count" id="count"></div></div>
+        <div class="mini-title">Ma planque</div>
+        <div class="vault-buttons">
+          <button class="text-btn glass" id="select-btn">Choisir</button>
+          <button class="icon-btn glass" id="settings-btn" aria-label="Réglages" data-icon="sliders"></button>
+          <button class="icon-btn glass" id="lock-btn" aria-label="Verrouiller" data-icon="lock"></button>
         </div>
-        <button class="text-btn" id="select-btn">Choisir</button>
-        <button class="icon-btn" id="settings-btn" aria-label="Réglages" data-icon="sliders"></button>
-        <button class="icon-btn" id="lock-btn" aria-label="Verrouiller" data-icon="lock"></button>
       </header>
       <button class="fab" id="fab"><span data-icon="plus"></span>Planquer</button>
-      <div class="selbar">
+      <div class="selbar glass">
         <button class="btn ghost" id="sel-share"><span data-icon="share"></span><span>Partager</span></button>
         <button class="btn danger" id="sel-delete"><span data-icon="trash"></span><span>Supprimer</span></button>
       </div>
@@ -179,13 +180,13 @@
   <div class="viewer" id="viewer">
     <div class="stage" id="stage"><div class="spinner" id="viewer-spin"></div><img id="viewer-img" alt=""></div>
     <div class="bar top">
-      <button class="icon-btn" id="viewer-close" aria-label="Fermer" data-icon="x"></button>
+      <button class="icon-btn glass" id="viewer-close" aria-label="Fermer" data-icon="x"></button>
       <div class="meta" id="viewer-meta"></div>
-      <div style="width:40px"></div>
+      <div style="width:44px"></div>
     </div>
     <div class="bar bottom">
-      <button class="icon-btn" id="viewer-share" aria-label="Partager" data-icon="share"></button>
-      <button class="icon-btn" id="viewer-delete" aria-label="Supprimer" data-icon="trash"></button>
+      <button class="icon-btn glass" id="viewer-share" aria-label="Partager" data-icon="share"></button>
+      <button class="icon-btn glass" id="viewer-delete" aria-label="Supprimer" data-icon="trash"></button>
     </div>
   </div>
 
