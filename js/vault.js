@@ -8,7 +8,10 @@ const METHODS = ['status', 'unlock', 'confirmNew', 'lock', 'uncover', 'thumbs', 
   'importPhotos', 'importCamera', 'importFiles', 'deleteOriginals', 'share', 'remove', 'setSetting', 'destroy',
   'recoverStart', 'recoverFinish', 'newRecovery', 'biometry', 'authenticate',
   'restore', 'createAlbum', 'renameAlbum', 'deleteAlbum', 'moveToAlbum', 'exportToPhotos',
-  'exportBackup', 'importBackup', 'setFaceDownLock', 'setIcon', 'getIcon', 'rekey'];
+  'exportBackup', 'importBackup', 'setFaceDownLock', 'setIcon', 'getIcon', 'rekey',
+  'bioStatus', 'bioEnable', 'bioDisable', 'bioUnlock', 'scanCard', 'saveCard',
+  'sharedCreate', 'sharedOpen', 'sharedSync', 'sharedInvite', 'sharedKey', 'sharedSendKey', 'sharedScan',
+  'sharedAddKey', 'sharedAccept', 'sharedDecline', 'sharedRename', 'sharedLeave', 'sharedCopy'];
 // seedDemo : aperçu navigateur uniquement (simulation).
 
 function nativeVault() {

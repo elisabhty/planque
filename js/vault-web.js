@@ -1,7 +1,8 @@
 // Simulation du coffre pour l'aperçu dans un navigateur (développement uniquement).
-// Même logique que le plugin iOS : PBKDF2 → mélange avec la clé de l'appareil (simulée ici par
-// un secret aléatoire, sur iPhone c'est la puce de sécurité) → HKDF → clé d'enveloppe + localisateur,
-// clé maîtresse aléatoire, phrase de récupération, AES-256-GCM, coffre vide si cachettes inconnues.
+// Même logique que le plugin iOS : combinaison du cadran → PBKDF2 → mélange avec la clé de l'appareil
+// (simulée ici par un secret aléatoire, sur iPhone c'est la puce de sécurité) → HKDF → clé d'enveloppe
+// + localisateur, clé maîtresse aléatoire, carte-clé de secours, AES-256-GCM, coffre vide si combinaison inconnue,
+// frein aux essais ratés.
 // Stockage : IndexedDB du navigateur. Sur iPhone, c'est le plugin Swift qui fait tout.
 
 const DB = 'planque-sim';
@@ -135,9 +136,9 @@ export class WebVault {
     return d;
   }
 
-  async derive(nuts) {
+  async derive(combo) {
     const { salt, secret } = await this.device();
-    const pw = await crypto.subtle.importKey('raw', enc.encode(`plq2|foret36|${nuts.join('-')}`), 'PBKDF2', false, ['deriveBits']);
+    const pw = await crypto.subtle.importKey('raw', enc.encode(`plq3|cadran100|${combo.join('-')}`), 'PBKDF2', false, ['deriveBits']);
     const pre = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: ITER, hash: 'SHA-256' }, pw, 256);
     const hk = await crypto.subtle.importKey('raw', secret, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
     const mixed = await crypto.subtle.sign('HMAC', hk, pre); // sur iPhone : ECDH avec la puce de sécurité
@@ -145,10 +146,29 @@ export class WebVault {
     return { kek: await aesKey(bits.slice(0, 32)), vaultId: hex(await crypto.subtle.digest('SHA-256', bits.slice(32, 64))).slice(0, 32) };
   }
 
-  check(nuts) {
-    if (!Array.isArray(nuts) || nuts.length < 5 || nuts.length > 16 || nuts.some((n) => !Number.isInteger(n) || n < 0 || n > 35)) {
-      throw Object.assign(new Error('Cache au moins 5 noisettes.'), { code: 'BAD_PATTERN' });
+  check(combo) {
+    if (!Array.isArray(combo) || combo.length !== 4 || combo.some((n) => !Number.isInteger(n) || n < 0 || n > 99)) {
+      throw Object.assign(new Error('Choisis 4 nombres sur le cadran.'), { code: 'BAD_PATTERN' });
     }
+  }
+
+  // Frein aux essais ratés (même règle que sur iPhone ; ici dans le stockage du navigateur).
+  throttle() {
+    try { return JSON.parse(localStorage.getItem('plq.sim.throttle')) || { misses: 0, last: 0 }; } catch { return { misses: 0, last: 0 }; }
+  }
+  effectiveMisses(st, now) { return st.misses > 0 ? Math.max(0, st.misses - Math.floor((now - st.last) / 3600)) : 0; }
+  waitLeft() {
+    const st = this.throttle();
+    const now = Date.now() / 1000;
+    const m = this.effectiveMisses(st, now);
+    const delay = m < 5 ? 0 : [30, 60, 300, 900, 3600][Math.min(m - 5, 4)];
+    return Math.max(0, Math.ceil(st.last + delay - now));
+  }
+  recordAttempt(opened) {
+    if (opened) return;
+    const now = Date.now() / 1000;
+    const st = this.throttle();
+    localStorage.setItem('plq.sim.throttle', JSON.stringify({ misses: this.effectiveMisses(st, now) + 1, last: now }));
   }
 
   async writeRecovery(s) {
@@ -171,10 +191,15 @@ export class WebVault {
 
   async status() { return { ready: true, problem: null, enclave: false }; }
 
-  async unlock({ nuts }) {
-    this.check(nuts);
+  async unlock({ combo }) {
+    this.check(combo);
     this.s = null;
-    const { kek, vaultId } = await this.derive(nuts);
+    const left = this.waitLeft();
+    if (left > 0) {
+      const msg = left >= 60 ? `Trop d’essais. Réessaie dans ${Math.ceil(left / 60)} min.` : `Trop d’essais. Réessaie dans ${left} s.`;
+      throw Object.assign(new Error(msg), { code: 'WAIT' });
+    }
+    const { kek, vaultId } = await this.derive(combo);
     let s = { vaultId, kek, master: await aesKey(rand(32)), persisted: false, index: { v: 1, items: [], settings: {} } };
     const wrapped = await get(`v:${vaultId}:key`);
     if (wrapped) {
@@ -188,6 +213,7 @@ export class WebVault {
       } catch { /* coffre vide, sans erreur */ }
     }
     this.s = s;
+    this.recordAttempt(s.persisted);
     if (s.persisted) {
       const now = Date.now();
       s.index.opens = [...(s.index.opens || []), now].slice(-30);
@@ -195,7 +221,7 @@ export class WebVault {
       if (expired.length) await this.purge(expired);
       await this.saveIndex();
     }
-    return { items: s.index.items, isNew: !s.persisted, settings: s.index.settings, albums: s.index.albums || [], opens: [...(s.index.opens || [])].reverse() };
+    return { ...this.unlockState(), byCombo: true };
   }
 
   async purge(ids) {
@@ -205,11 +231,11 @@ export class WebVault {
     for (const id of ids) { await del(`v:${s.vaultId}:b:${id}`); await del(`v:${s.vaultId}:t:${id}`); }
   }
 
-  async confirmNew({ nuts }) {
+  async confirmNew({ combo }) {
     const s = this.need();
     if (s.persisted) return { ok: true };
-    try { this.check(nuts); } catch { return { ok: false }; }
-    const { vaultId } = await this.derive(nuts);
+    try { this.check(combo); } catch { return { ok: false }; }
+    const { vaultId } = await this.derive(combo);
     if (vaultId !== s.vaultId) return { ok: false };
     const raw = await crypto.subtle.exportKey('raw', s.master);
     await put(`v:${vaultId}:key`, await seal(s.kek, raw, `plq-key|${vaultId}`));
@@ -235,13 +261,13 @@ export class WebVault {
     return { found: false };
   }
 
-  async recoverFinish({ nuts }) {
-    this.check(nuts);
+  async recoverFinish({ combo }) {
+    this.check(combo);
     const p = this.pending;
     if (!p) throw Object.assign(new Error('Le coffre est verrouillé.'), { code: 'LOCKED' });
-    const { kek, vaultId } = await this.derive(nuts);
+    const { kek, vaultId } = await this.derive(combo);
     if (vaultId !== p.vaultId && await get(`v:${vaultId}:key`)) {
-      throw Object.assign(new Error('Ces cachettes ouvrent déjà un autre coffre. Choisis-en d’autres.'), { code: 'IO' });
+      throw Object.assign(new Error('Cette combinaison ouvre déjà un autre coffre. Choisis-en une autre.'), { code: 'IO' });
     }
     if (vaultId !== p.vaultId) {
       for (const k of await keysWithPrefix(`v:${p.vaultId}:`)) {
@@ -251,12 +277,38 @@ export class WebVault {
     }
     await put(`v:${vaultId}:key`, await seal(kek, p.raw, `plq-key|${vaultId}`));
     this.pending = null;
-    return this.unlock({ nuts });
+    return this.openWith(kek, vaultId);
   }
 
   async newRecovery() { const s = this.needPersisted(); return { recovery: await this.writeRecovery(s) }; }
   async biometry() { return { available: false, type: 'none' }; }
   async authenticate() { return { ok: true, available: false }; }
+
+  // Face ID et appareil photo : seulement dans l'app iPhone.
+  async bioStatus() { return { available: false, enabled: false, type: 'faceID' }; }
+  async bioEnable() { throw Object.assign(new Error('Face ID fonctionne dans l’app iPhone.'), { code: 'UNAVAILABLE' }); }
+  async bioDisable() { return { enabled: false }; }
+  async bioUnlock() { return { ok: false }; }
+  async scanCard() { return { text: '', unavailable: true }; }
+  async saveCard({ png }) {
+    const a = document.createElement('a');
+    a.href = `data:image/png;base64,${png}`;
+    a.download = 'Carte-cle-Planque.png';
+    a.click();
+    return { done: true, via: 'download' };
+  }
+
+  /** Rouvre un coffre à partir de sa clé d'enveloppe (récupération, nouvelle combinaison). */
+  async openWith(kek, vaultId) {
+    const wrapped = await get(`v:${vaultId}:key`);
+    const raw = await open(kek, wrapped, `plq-key|${vaultId}`);
+    const master = await aesKey(raw);
+    let index = { v: 1, items: [], settings: {} };
+    const ei = await get(`v:${vaultId}:index`);
+    if (ei) index = JSON.parse(dec.decode(await open(master, ei, 'plq-index')));
+    this.s = { vaultId, kek, master, persisted: true, index };
+    return this.unlockState();
+  }
 
   async lock() { this.s = null; }
   async uncover() {}
@@ -452,19 +504,19 @@ export class WebVault {
     return { imported: true, already: false };
   }
 
-  async rekey({ nuts }) {
-    this.check(nuts);
+  async rekey({ combo }) {
+    this.check(combo);
     const s = this.needPersisted();
-    const { kek, vaultId } = await this.derive(nuts);
-    if (vaultId === s.vaultId) return this.unlock({ nuts });
-    if (await get(`v:${vaultId}:key`)) throw Object.assign(new Error('Ces cachettes ouvrent déjà un autre coffre. Choisis-en d’autres.'), { code: 'IO' });
+    const { kek, vaultId } = await this.derive(combo);
+    if (vaultId === s.vaultId) return this.unlockState();
+    if (await get(`v:${vaultId}:key`)) throw Object.assign(new Error('Cette combinaison ouvre déjà un autre coffre. Choisis-en une autre.'), { code: 'IO' });
     for (const k of await keysWithPrefix(`v:${s.vaultId}:`)) {
       await put(k.replace(`v:${s.vaultId}:`, `v:${vaultId}:`), await get(k));
       await del(k);
     }
     const raw = await crypto.subtle.exportKey('raw', s.master);
     await put(`v:${vaultId}:key`, await seal(kek, raw, `plq-key|${vaultId}`));
-    return this.unlock({ nuts });
+    return this.openWith(kek, vaultId);
   }
 
   // Remplit le coffre ouvert avec des photos d'exemple (aperçu navigateur uniquement).
@@ -510,7 +562,8 @@ export class WebVault {
 
   unlockState() {
     const s = this.s;
-    return { items: s.index.items, isNew: !s.persisted, settings: s.index.settings, albums: s.index.albums || [], opens: [...(s.index.opens || [])].reverse() };
+    return { items: s.index.items, isNew: !s.persisted, settings: s.index.settings, albums: s.index.albums || [],
+      opens: [...(s.index.opens || [])].reverse(), shared: [], invite: null, pendingKeys: 0 };
   }
 
   async setFaceDownLock() { return {}; }
