@@ -158,6 +158,9 @@ async function boot() {
   $('#settings-btn').addEventListener('click', openSettings);
   $('#select-btn').addEventListener('click', () => setSelecting(!state.selecting));
   $('#fab').addEventListener('click', openImport);
+  $('#scroll').addEventListener('scroll', (e) => {
+    $('#vault').classList.toggle('scrolled', e.currentTarget.scrollTop > 36);
+  }, { passive: true });
   $('#sel-share').addEventListener('click', () => shareItems([...state.selected]));
   $('#sel-delete').addEventListener('click', () => confirmDelete([...state.selected]));
   setupViewer();
@@ -598,7 +601,8 @@ function openVault(res) {
 
 function renderCount() {
   const n = state.items.length;
-  $('#count').textContent = n ? addedText(state.items) : 'Chiffrée sur cet iPhone';
+  $('#count').textContent = n ? addedText(state.items) : '';
+  $('#grid-foot').innerHTML = n ? `${esc(addedText(state.items))}<small>Chiffrés sur cet iPhone</small>` : '';
 }
 
 function tileHTML(item) {
@@ -711,12 +715,14 @@ function openImport() {
   haptic('light');
   openSheet(`
     <div class="row-mascot">
-      <div data-noisette="awake" data-size="58"></div>
+      <div data-noisette="awake" data-size="54"></div>
       <div class="txt"><h3>Qu’est-ce qu’on planque ?</h3></div>
     </div>
-    <button class="opt" data-src="photos"><span class="ico">${icon('image')}</span><span><b>Photos et vidéos</b><small>Depuis ta pellicule</small></span></button>
-    <button class="opt" data-src="camera"><span class="ico">${icon('camera')}</span><span><b>Appareil photo</b><small>Directement dans le coffre, sans passer par ta pellicule</small></span></button>
-    <button class="opt" data-src="files"><span class="ico">${icon('folder')}</span><span><b>Fichiers</b><small>PDF, papiers, documents…</small></span></button>
+    <div class="group">
+      <button class="opt" data-src="photos"><span class="ico blue">${icon('image')}</span><span><b>Photos et vidéos</b><small>Depuis ta pellicule</small></span></button>
+      <button class="opt" data-src="camera"><span class="ico gray">${icon('camera')}</span><span><b>Appareil photo</b><small>Directement dans le coffre, sans passer par ta pellicule</small></span></button>
+      <button class="opt" data-src="files"><span class="ico teal">${icon('folder')}</span><span><b>Fichiers</b><small>PDF, papiers, documents</small></span></button>
+    </div>
   `, {
     onMount: (body) => $$('[data-src]', body).forEach((b) => b.addEventListener('click', () => {
       const src = b.dataset.src;
@@ -767,7 +773,7 @@ function onProgress({ done, total }) {
 function askDeleteOriginals(n) {
   setTimeout(() => openSheet(`
     <div class="row-mascot">
-      <div data-noisette="awake" data-size="58"></div>
+      <div data-noisette="awake" data-size="54"></div>
       <div class="txt"><h3>Et les originaux ?</h3></div>
     </div>
     <p>${n > 1 ? `Ces ${n} fichiers sont` : 'Ce fichier est'} encore dans ta pellicule, visible par n’importe qui. Tu veux les supprimer de Photos ? iOS va te demander de confirmer.</p>
@@ -939,21 +945,25 @@ async function openSettings() {
   const bioName = bio.type === 'faceID' ? 'Face ID' : bio.type === 'touchID' ? 'Touch ID' : 'Code de l’iPhone';
   openSheet(`
     <div class="row-mascot">
-      <div data-noisette="awake" data-size="58"></div>
-      <div class="txt"><h3>Ce coffre</h3><p style="margin:0">${state.items.length ? `${addedText(state.items)} · ${fmtSize(size)}` : 'Vide pour l’instant'}</p></div>
+      <div data-noisette="awake" data-size="54"></div>
+      <div class="txt"><h3>Ce coffre</h3><p>${state.items.length ? `${addedText(state.items)}, ${fmtSize(size)}` : 'Vide pour l’instant'}</p></div>
     </div>
-    <div class="setting">
-      <div class="txt"><b>Proposer de supprimer les originaux</b><small>Après un import depuis Photos</small></div>
-      <button class="switch ${ask ? 'on' : ''}" id="sw-ask" role="switch" aria-checked="${ask}"></button>
+    <div class="group">
+      <div class="setting">
+        <div class="txt"><b>Supprimer les originaux</b><small>Le proposer après un import depuis Photos</small></div>
+        <button class="switch ${ask ? 'on' : ''}" id="sw-ask" role="switch" aria-checked="${ask}" aria-label="Proposer de supprimer les originaux"></button>
+      </div>
+      <div class="setting">
+        <div class="txt"><b>${bioName} à l’ouverture</b><small>En plus des cachettes, pour tous les coffres</small></div>
+        <button class="switch ${faceOn ? 'on' : ''}" id="sw-face" role="switch" aria-checked="${faceOn}" aria-label="${bioName} à l’ouverture"></button>
+      </div>
     </div>
-    <div class="setting">
-      <div class="txt"><b>${bioName} avant la forêt</b><small>Un verrou de plus à l’ouverture de l’appli, pour tous les coffres</small></div>
-      <button class="switch ${faceOn ? 'on' : ''}" id="sw-face" role="switch" aria-checked="${faceOn}"></button>
+    <div class="group">
+      <button class="opt" id="new-phrase"><span class="ico">${icon('phrase')}</span><span><b>Nouvelle phrase de secours</b><small>Si tu as perdu celle de ce coffre</small></span></button>
+      <button class="opt" id="info-decoy"><span class="ico purple">${icon('mask')}</span><span><b>Créer un coffre leurre</b><small>Pour le jour où on te force à ouvrir Planque</small></span></button>
+      <button class="opt" id="info-security"><span class="ico green">${icon('shield')}</span><span><b>Comment tes fichiers sont protégés</b></span></button>
     </div>
-    <button class="opt" id="new-phrase"><span class="ico">${icon('phrase')}</span><span><b>Nouvelle phrase de secours</b><small>Si tu as perdu celle de ce coffre</small></span></button>
-    <button class="opt" id="info-decoy"><span class="ico">${icon('mask')}</span><span><b>Créer un coffre leurre</b><small>Pour le jour où on te force à ouvrir Planque</small></span></button>
-    <button class="opt" id="info-security"><span class="ico">${icon('shield')}</span><span><b>Comment tes fichiers sont protégés</b><small>Puce de sécurité, chiffrement, changement d’iPhone</small></span></button>
-    <div class="actions" style="margin-top:22px">
+    <div class="actions" style="margin-top:18px">
       <button class="btn danger small" id="destroy">Effacer ce coffre</button>
     </div>
   `, {
@@ -1014,11 +1024,11 @@ function confirmNewPhrase() {
 function showDecoyInfo() {
   openSheet(`
     <div class="row-mascot">
-      <div data-noisette="awake" data-size="58"></div>
+      <div data-noisette="awake" data-size="54"></div>
       <div class="txt"><h3>Le coffre leurre</h3></div>
     </div>
     <p>Chaque parcours ouvre son propre coffre. Des cachettes inconnues n’affichent jamais d’erreur : elles ouvrent un coffre vide.</p>
-    <p><b style="color:var(--text)">Pour en créer un :</b> verrouille Planque, cache tes noisettes ailleurs, puis mets-y quelques photos sans importance.</p>
+    <p><b>Pour en créer un :</b> verrouille Planque, cache tes noisettes ailleurs, puis mets-y quelques photos sans importance.</p>
     <p>Si quelqu’un te force à ouvrir l’appli, c’est ce parcours-là que tu fais. Rien n’indique combien de coffres existent, et Noisette réagit exactement pareil dans tous.</p>
     <div class="actions"><button class="btn ghost" id="back">Compris</button></div>
   `, { onMount: (b) => { $('#back', b).onclick = closeSheet; } });
@@ -1027,13 +1037,13 @@ function showDecoyInfo() {
 function showSecurityInfo() {
   openSheet(`
     <div class="row-mascot">
-      <div data-noisette="awake" data-size="58"></div>
+      <div data-noisette="awake" data-size="54"></div>
       <div class="txt"><h3>Ce que fait Planque</h3></div>
     </div>
     <p>Chaque fichier est chiffré en AES-256 sur ton iPhone dès son arrivée. Les noms, les dates et les miniatures aussi.</p>
     <p>La clé vient de tes cachettes et d’une clé rangée dans la puce de sécurité de ton iPhone, d’où elle ne peut pas sortir. Chaque essai doit donc passer par ton iPhone : copier tes fichiers ailleurs ne sert à rien.</p>
     <p>Pas de compte, pas de serveur : personne d’autre que toi ne peut ouvrir tes coffres, nous compris.</p>
-    <div class="note"><b style="color:var(--text)">Changer d’iPhone :</b> tes coffres chiffrés suivent la sauvegarde de ton iPhone, mais pas la clé de la puce. Sur le nouvel iPhone, rouvre chaque coffre avec sa phrase de secours.</div>
+    <div class="note"><b>Changer d’iPhone :</b> tes coffres chiffrés suivent la sauvegarde de ton iPhone, mais pas la clé de la puce. Sur le nouvel iPhone, rouvre chaque coffre avec sa phrase de secours.</div>
     <div class="actions"><button class="btn ghost" id="back">Fermer</button></div>
   `, { onMount: (b) => { $('#back', b).onclick = closeSheet; } });
 }
