@@ -1,5 +1,5 @@
 // Phrase de récupération : 128 bits ⇄ 12 mots (norme BIP39, liste française).
-import { WORDS } from './words-fr.js';
+import { WORDS } from './words-fr.js?v=20261114a';
 
 export const norm = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 const INDEX = new Map(WORDS.map((w, i) => [norm(w), i]));
