@@ -26,6 +26,14 @@ const I = {
   chip: '<rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>',
   faceid: '<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M9 9.5v1M15 9.5v1M12 9.5v3.5h-1M9.5 15.5c1.4 1 3.6 1 5 0"/>',
   phrase: '<path d="M4 6h16M4 10h10M4 14h16M4 18h8"/>',
+  download: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 20h14"/>',
+  album: '<rect x="3" y="7" width="18" height="13" rx="3"/><path d="M6 7V5.5A1.5 1.5 0 0 1 7.5 4h9A1.5 1.5 0 0 1 18 5.5V7"/>',
+  restore: '<path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6"/><path d="M4 4v4.6h4.6"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  backup: '<path d="M7 18a5 5 0 0 1-.6-10A6 6 0 0 1 18 9a4.5 4.5 0 0 1-.5 9"/><path d="M12 12v8M9 15l3-3 3 3"/>',
+  flip: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M3 9.5a9 9 0 0 0 0 5M21 9.5a9 9 0 0 1 0 5"/>',
+  apps: '<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/>',
+  pencil: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
 };
 const icon = (name, size = 22) =>
   `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[name] || ''}</svg>`;
@@ -66,7 +74,20 @@ const state = {
   selected: new Set(),
   viewer: { list: [], index: -1, zoom: false },
   importing: false,
+  albums: [],
+  album: 'all',        // 'all' | id d'album | 'trash'
+  opens: [],
 };
+const FACEDOWN = 'plq.facedown';
+const DAY = 864e5;
+const when = (i) => i.taken || i.added;
+const alive = () => state.items.filter((i) => !i.deleted);
+const trashed = () => state.items.filter((i) => i.deleted);
+function visible() {
+  const list = state.album === 'trash' ? trashed()
+    : alive().filter((i) => state.album === 'all' || i.album === state.album);
+  return list.sort((a, b) => (state.album === 'trash' ? b.deleted - a.deleted : when(b) - when(a)));
+}
 
 // ---------------------------------------------------------------------------
 // Écrans, feuilles, toast
@@ -161,8 +182,11 @@ async function boot() {
   $('#scroll').addEventListener('scroll', (e) => {
     $('#vault').classList.toggle('scrolled', e.currentTarget.scrollTop > 36);
   }, { passive: true });
-  $('#sel-share').addEventListener('click', () => shareItems([...state.selected]));
-  $('#sel-delete').addEventListener('click', () => confirmDelete([...state.selected]));
+  $('#selbar').addEventListener('click', onSelbar);
+  $('#albums').addEventListener('click', onAlbumChip);
+  $('#grid-foot').addEventListener('click', onFootClick);
+  $('#banner').addEventListener('click', onBannerClick);
+  if (localStorage.getItem(FACEDOWN) === '1') Vault.setFaceDownLock({ on: true }).catch(() => {});
   setupViewer();
   setupForest();
   setupPhrase();
@@ -225,6 +249,8 @@ const MODES = {
   confirm: { title: 'Nouveau coffre', sub: 'Refais le parcours qui a ouvert ce coffre pour le créer.', go: 'Créer le coffre', link: 'Annuler', strength: false, mascot: 'awake' },
   recover1: { title: 'Coffre retrouvé !', sub: 'Choisis le parcours qui l’ouvrira désormais.', go: 'Valider', link: 'Annuler', strength: true, mascot: 'happy' },
   recover2: { title: 'Encore une fois', sub: 'Refais le même parcours, dans le même ordre.', go: 'Confirmer', link: 'Recommencer', strength: false, mascot: 'awake' },
+  rekey1: { title: 'Nouvelles cachettes', sub: 'Choisis le nouveau parcours de ce coffre. L’ancien n’ouvrira plus rien.', go: 'Valider', link: 'Annuler', strength: true, mascot: 'awake' },
+  rekey2: { title: 'Encore une fois', sub: 'Refais le même parcours, dans le même ordre.', go: 'Confirmer', link: 'Recommencer', strength: false, mascot: 'awake' },
 };
 let forest;
 const secret = { mode: 'lock', first: null, then: null };
@@ -315,22 +341,26 @@ async function submitSecret() {
       return doUnlock(seq);
     case 'create1':
     case 'recover1':
+    case 'rekey1':
       secret.first = seq;
       haptic('medium');
       setNoisette(mascot, 'happy');
       forest.busy(true);
       await wait(500);
-      return startSecret(secret.mode === 'create1' ? 'create2' : 'recover2', { keepFirst: true });
+      return startSecret(secret.mode.replace('1', '2'), { keepFirst: true });
     case 'create2':
-    case 'recover2': {
+    case 'recover2':
+    case 'rekey2': {
       const first = secret.first || [];
       if (seq.join('-') !== first.join('-')) {
         secretFail('Ce n’est pas le même parcours. On recommence.');
         forest.busy(true);
         await wait(1300);
-        return startSecret(secret.mode === 'create2' ? 'create1' : 'recover1');
+        return startSecret(secret.mode.replace('2', '1'));
       }
-      return secret.mode === 'create2' ? finishCreate(seq) : finishRecover(seq);
+      if (secret.mode === 'create2') return finishCreate(seq);
+      if (secret.mode === 'rekey2') return finishRekey(seq);
+      return finishRecover(seq);
     }
     case 'confirm':
       return finishConfirm(seq);
@@ -346,6 +376,8 @@ function secretLink() {
     case 'create2': return startSecret('create1');
     case 'recover2': return startSecret('recover1');
     case 'recover1': return lockNow();
+    case 'rekey2': return startSecret('rekey1');
+    case 'rekey1': return show('vault');
     case 'confirm': secret.then = null; return show('vault');
     default: return undefined;
   }
@@ -440,6 +472,24 @@ async function finishRecover(seq) {
   }
 }
 
+async function finishRekey(seq) {
+  forest.busy(true);
+  setNoisette($('#secret-mascot'), 'think');
+  setBubble('Je change la serrure…');
+  try {
+    const res = await Vault.rekey({ nuts: seq });
+    haptic('success');
+    setNoisette($('#secret-mascot'), 'happy');
+    await wait(500);
+    openVault(res);
+    toast('Nouvelles cachettes en place');
+  } catch (e) {
+    secretFail(e?.code === 'IO' && e.message ? e.message : 'Un souci est survenu. Réessaie.');
+    await wait(1600);
+    startSecret('rekey1');
+  }
+}
+
 function showLock() {
   closeSheet();
   closeViewer(true);
@@ -454,7 +504,7 @@ async function lockNow() {
 }
 
 function onLocked() {
-  // Envoyé par iOS quand l'appli passe en arrière-plan : tout est déjà effacé côté natif.
+  // Envoyé par iOS quand l'appli passe en arrière-plan (ou iPhone retourné) : tout est déjà effacé côté natif.
   clearVault();
   const inside = ['vault', 'secret', 'phrase', 'quiz', 'recover', 'gate'].includes(current?.id);
   if (localStorage.getItem(ONBOARDED) && inside) showEntry();
@@ -467,8 +517,13 @@ function clearVault() {
   state.selected.clear();
   state.settings = {};
   state.isNew = false;
+  state.albums = [];
+  state.opens = [];
+  state.album = 'all';
   setSelecting(false);
   $('#grid').innerHTML = '';
+  $('#albums').innerHTML = '';
+  $('#banner').innerHTML = '';
   $('#words').innerHTML = '';
   $('#busy').classList.remove('show');
   closeViewer(true);
@@ -558,6 +613,20 @@ function setupRecover() {
   });
   $('#recover-back').onclick = () => (recoverFrom === 'problem' ? show('problem') : showLock());
   $('#recover-go').onclick = submitRecover;
+  $('#recover-file').onclick = importBackupFile;
+}
+
+async function importBackupFile() {
+  haptic('light');
+  let r = { imported: false };
+  try { r = await Vault.importBackup(); } catch { r = { imported: false, error: 'Import impossible.' }; }
+  if (r.locked) return;
+  if (r.error) { haptic('warning'); setHint('#recover-hint', r.error, true); return; }
+  if (!r.imported) return;
+  if (r.already) { setHint('#recover-hint', 'Ce coffre est déjà sur cet iPhone : ouvre-le avec tes cachettes, ou tape sa phrase.'); return; }
+  haptic('success');
+  setHint('#recover-hint', 'Sauvegarde ajoutée. Tape maintenant la phrase de secours de ce coffre.');
+  $('#recover-input').focus();
 }
 
 async function submitRecover() {
@@ -593,16 +662,66 @@ function openVault(res) {
   state.items = res.items || [];
   state.isNew = !!res.isNew;
   state.settings = res.settings || {};
+  state.albums = res.albums || [];
+  state.opens = res.opens || [];
+  if (state.album !== 'all' && state.album !== 'trash' && !state.albums.some((a) => a.id === state.album)) state.album = 'all';
   state.thumbs.clear();
   renderGallery();
   show('vault');
   $('#scroll').scrollTop = 0;
 }
 
+function applyItems(items) {
+  if (items) state.items = items;
+  renderGallery();
+}
+
+const monthFmt = new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' });
+const monthLabel = (ms) => { const t = monthFmt.format(new Date(ms)); return t.charAt(0).toUpperCase() + t.slice(1); };
+
 function renderCount() {
-  const n = state.items.length;
-  $('#count').textContent = n ? addedText(state.items) : '';
-  $('#grid-foot').innerHTML = n ? `${esc(addedText(state.items))}<small>Chiffrés sur cet iPhone</small>` : '';
+  const list = visible();
+  const albumName = state.album === 'trash' ? 'Supprimés récemment' : state.albums.find((a) => a.id === state.album)?.name;
+  $('#count').textContent = list.length ? addedText(list) : '';
+  $('.vault-title h2').textContent = albumName || 'Ma planque';
+  $('.mini-title').textContent = albumName || 'Ma planque';
+  let foot = list.length ? `${esc(addedText(list))}` : '';
+  if (state.album === 'trash') {
+    foot += `<small>Effacés pour de bon 30 jours après leur suppression.</small>`;
+    if (list.length) foot += `<span class="foot-links"><button data-foot="restore-all">Tout récupérer</button><button data-foot="empty" class="red">Tout supprimer</button></span>`;
+  } else if (albumName) {
+    foot += `<span class="foot-links"><button data-foot="rename">Renommer l’album</button><button data-foot="del-album" class="red">Supprimer l’album</button></span>`;
+  } else if (list.length) {
+    foot += '<small>Chiffrés sur cet iPhone</small>';
+  }
+  $('#grid-foot').innerHTML = foot;
+}
+
+function renderAlbums() {
+  const all = alive();
+  const t = trashed().length;
+  const chip = (id, label, n) => `<button class="chip${state.album === id ? ' on' : ''}" data-album="${esc(id)}" role="tab" aria-selected="${state.album === id}">${esc(label)}${n != null ? ` <span>${n}</span>` : ''}</button>`;
+  $('#albums').innerHTML = (all.length || state.albums.length || t)
+    ? chip('all', 'Tout', all.length)
+      + state.albums.map((a) => chip(a.id, a.name, all.filter((i) => i.album === a.id).length)).join('')
+      + `<button class="chip add" data-album="new" aria-label="Nouvel album">${icon('plus', 16)}Album</button>`
+      + (t ? chip('trash', 'Supprimés', t) : '')
+    : '';
+}
+
+function renderBanner() {
+  const last = Number(state.settings.lastBackup || 0);
+  const snooze = Number(state.settings.backupSnooze || 0);
+  const n = alive().length;
+  const due = n >= 5 && Date.now() - last > 30 * DAY && Date.now() > snooze && state.album !== 'trash';
+  $('#banner').innerHTML = due ? `
+    <div class="banner">
+      <span class="ico">${icon('backup', 20)}</span>
+      <div class="txt"><b>${last ? 'Ta sauvegarde date un peu' : 'Aucune sauvegarde pour l’instant'}</b>
+        <small>Un fichier chiffré à ranger dans Fichiers ou iCloud Drive : si tu perds ton iPhone, tes photos ne sont pas perdues.</small>
+        <span class="banner-actions"><button class="btn small" data-banner="go">Sauvegarder</button><button class="text-btn" data-banner="later">Plus tard</button></span>
+      </div>
+    </div>` : '';
 }
 
 function tileHTML(item) {
@@ -615,18 +734,40 @@ function tileHTML(item) {
     if (item.kind === 'video') inner += `<span class="badge">${icon('play', 11)}${fmtDuration(item.duration)}</span>`;
     if (item.kind === 'file') inner += `<span class="badge">${esc((item.ext || '').toUpperCase())}</span>`;
   }
+  if (item.deleted) {
+    const left = Math.max(0, 30 - Math.floor((Date.now() - item.deleted) / DAY));
+    inner += `<span class="days">${left} j</span>`;
+  }
   return `<button class="tile${sel}" data-id="${esc(item.id)}" aria-label="${esc(item.name)}">${inner}<span class="check">${icon('check', 14)}</span></button>`;
 }
 
 let observer;
 function renderGallery() {
-  const grid = $('#grid');
-  grid.innerHTML = state.items.map(tileHTML).join('');
-  $('#empty').classList.toggle('show', state.items.length === 0);
+  const list = visible();
+  let html = '';
+  if (state.album === 'trash') {
+    html = list.length ? `<div class="grid">${list.map(tileHTML).join('')}</div>` : '';
+  } else {
+    let month = '';
+    for (const it of list) {
+      const m = monthLabel(when(it));
+      if (m !== month) { html += `${month ? '</div>' : ''}<h4 class="month">${m}</h4><div class="grid">`; month = m; }
+      html += tileHTML(it);
+    }
+    if (month) html += '</div>';
+  }
+  $('#grid').innerHTML = html;
+  const empty = alive().length === 0 && state.album === 'all';
+  $('#empty').classList.toggle('show', empty);
   setNoisette($('#empty-mascot'), 'awake');
-  $('#select-btn').style.visibility = state.items.length ? 'visible' : 'hidden';
+  $('#select-btn').style.visibility = list.length ? 'visible' : 'hidden';
+  $('#fab').style.display = state.album === 'trash' ? 'none' : '';
+  $('#vault').classList.toggle('in-trash', state.album === 'trash');
+  renderAlbums();
+  renderBanner();
   renderCount();
   observeTiles();
+  updateSelbar();
 }
 
 function observeTiles() {
@@ -678,7 +819,8 @@ $('#grid').addEventListener('click', (e) => {
   if (!tile) return;
   const item = state.items.find((i) => i.id === tile.dataset.id);
   if (!item) return;
-  if (state.selecting) {
+  if (state.selecting || state.album === 'trash') {
+    if (!state.selecting) setSelecting(true);
     haptic('select');
     if (state.selected.has(item.id)) state.selected.delete(item.id); else state.selected.add(item.id);
     tile.classList.toggle('sel', state.selected.has(item.id));
@@ -702,10 +844,238 @@ function setSelecting(on) {
 
 function updateSelbar() {
   const n = state.selected.size;
-  $('#sel-share span:last-child').textContent = n ? `Partager (${n})` : 'Partager';
-  $('#sel-delete span:last-child').textContent = n ? `Supprimer (${n})` : 'Supprimer';
-  $('#sel-share').disabled = $('#sel-delete').disabled = n === 0;
-  $('#sel-share').style.opacity = $('#sel-delete').style.opacity = n ? 1 : 0.45;
+  const b = (act, ic, label, cls = '') => `<button class="sel-act ${cls}" data-act="${act}"${n ? '' : ' disabled'}>${icon(ic, 22)}<span>${label}</span></button>`;
+  $('#selbar').innerHTML = state.album === 'trash'
+    ? b('restore', 'restore', 'Récupérer') + b('purge', 'trash', 'Supprimer', 'red')
+    : b('share', 'share', 'Partager') + b('album', 'album', 'Album') + b('photos', 'download', 'Photos') + b('delete', 'trash', 'Supprimer', 'red');
+  const label = $('#count');
+  if (state.selecting) label.textContent = n ? plural(n, 'élément choisi', 'éléments choisis') : 'Choisis des éléments';
+}
+
+function onSelbar(e) {
+  const act = e.target.closest('[data-act]')?.dataset.act;
+  if (!act) return;
+  const ids = [...state.selected];
+  if (!ids.length) return;
+  ({
+    share: () => shareItems(ids),
+    album: () => pickAlbum(ids),
+    photos: () => saveToPhotos(ids),
+    delete: () => confirmDelete(ids),
+    restore: () => restoreItems(ids),
+    purge: () => confirmPurge(ids),
+  })[act]?.();
+}
+
+function onAlbumChip(e) {
+  const chip = e.target.closest('[data-album]');
+  if (!chip) return;
+  const id = chip.dataset.album;
+  haptic('select');
+  if (id === 'new') return newAlbum();
+  if (id === state.album && id !== 'all' && id !== 'trash') return albumOptions(id);
+  setSelecting(false);
+  state.album = id;
+  renderGallery();
+  $('#scroll').scrollTop = 0;
+}
+
+function onFootClick(e) {
+  const a = e.target.closest('[data-foot]')?.dataset.foot;
+  if (!a) return;
+  const ids = trashed().map((i) => i.id);
+  ({
+    'restore-all': () => restoreItems(ids),
+    empty: () => confirmPurge(ids),
+    rename: () => renameAlbum(state.album),
+    'del-album': () => confirmDeleteAlbum(state.album),
+  })[a]?.();
+}
+
+function onBannerClick(e) {
+  const a = e.target.closest('[data-banner]')?.dataset.banner;
+  if (a === 'go') runBackup();
+  if (a === 'later') {
+    const until = String(Date.now() + 7 * DAY);
+    state.settings.backupSnooze = until;
+    Vault.setSetting({ key: 'backupSnooze', value: until }).catch(() => {});
+    renderBanner();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Albums
+// ---------------------------------------------------------------------------
+function nameSheet({ title, value = '', ok, onOk }) {
+  openSheet(`
+    <h3>${esc(title)}</h3>
+    <input class="field" id="name-input" maxlength="40" value="${esc(value)}" placeholder="Nom de l’album" autocomplete="off" enterkeyhint="done">
+    <div class="actions">
+      <button class="btn" id="name-ok">${esc(ok)}</button>
+      <button class="btn ghost" id="name-no">Annuler</button>
+    </div>
+  `, {
+    onMount: (b) => {
+      const input = $('#name-input', b);
+      setTimeout(() => input.focus(), 350);
+      const go = async () => {
+        const v = input.value.trim();
+        if (!v) { input.focus(); return; }
+        try { await onOk(v); closeSheet(); } catch (err) { toast(err?.message || 'Impossible pour le moment.'); }
+      };
+      $('#name-ok', b).onclick = go;
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+      $('#name-no', b).onclick = closeSheet;
+    },
+  });
+}
+
+async function ensureCreated() {
+  if (!state.isNew) return true;
+  toast('Ajoute d’abord un fichier pour créer ce coffre.');
+  return false;
+}
+
+async function newAlbum(thenMove) {
+  if (!await ensureCreated()) return;
+  nameSheet({
+    title: 'Nouvel album',
+    ok: 'Créer',
+    onOk: async (name) => {
+      const r = await Vault.createAlbum({ name });
+      state.albums = r.albums;
+      if (thenMove) {
+        const m = await Vault.moveToAlbum({ ids: thenMove, album: r.album.id });
+        state.items = m.items;
+        setSelecting(false);
+        toast(`Rangé dans « ${r.album.name} »`);
+      }
+      state.album = r.album.id;
+      renderGallery();
+      haptic('success');
+    },
+  });
+}
+
+function albumOptions(id) {
+  const a = state.albums.find((x) => x.id === id);
+  if (!a) return;
+  openSheet(`
+    <h3>${esc(a.name)}</h3>
+    <div class="group">
+      <button class="opt" id="ao-rename"><span class="ico gray">${icon('pencil')}</span><span><b>Renommer</b></span></button>
+      <button class="opt" id="ao-delete"><span class="ico" style="background:var(--red)">${icon('trash')}</span><span><b>Supprimer l’album</b><small>Les photos restent dans « Tout »</small></span></button>
+    </div>
+  `, {
+    onMount: (b) => {
+      $('#ao-rename', b).onclick = () => { closeSheet(); setTimeout(() => renameAlbum(id), 300); };
+      $('#ao-delete', b).onclick = () => { closeSheet(); setTimeout(() => confirmDeleteAlbum(id), 300); };
+    },
+  });
+}
+
+function renameAlbum(id) {
+  const a = state.albums.find((x) => x.id === id);
+  if (!a) return;
+  nameSheet({
+    title: 'Renommer l’album',
+    value: a.name,
+    ok: 'Renommer',
+    onOk: async (name) => { const r = await Vault.renameAlbum({ id, name }); state.albums = r.albums; renderGallery(); },
+  });
+}
+
+function confirmDeleteAlbum(id) {
+  const a = state.albums.find((x) => x.id === id);
+  if (!a) return;
+  openSheet(`
+    <h3>Supprimer « ${esc(a.name)} » ?</h3>
+    <p>L’album disparaît, pas les photos : elles restent dans « Tout ».</p>
+    <div class="actions">
+      <button class="btn danger" id="da-yes">Supprimer l’album</button>
+      <button class="btn ghost" id="da-no">Annuler</button>
+    </div>
+  `, {
+    onMount: (b) => {
+      $('#da-no', b).onclick = closeSheet;
+      $('#da-yes', b).onclick = async () => {
+        closeSheet();
+        try {
+          const r = await Vault.deleteAlbum({ id });
+          state.albums = r.albums;
+          state.items = r.items;
+          state.album = 'all';
+          renderGallery();
+          haptic('success');
+        } catch { toast('Impossible pour le moment.'); }
+      };
+    },
+  });
+}
+
+function pickAlbum(ids) {
+  const inAlbum = state.items.some((i) => ids.includes(i.id) && i.album);
+  openSheet(`
+    <h3>Ranger ${ids.length > 1 ? `ces ${ids.length} éléments` : 'cet élément'}</h3>
+    <div class="group">
+      ${state.albums.map((a) => `<button class="opt" data-to="${esc(a.id)}"><span class="ico blue">${icon('album')}</span><span><b>${esc(a.name)}</b></span></button>`).join('')}
+      <button class="opt" data-to="new"><span class="ico">${icon('plus')}</span><span><b>Nouvel album…</b></span></button>
+      ${inAlbum ? `<button class="opt" data-to=""><span class="ico gray">${icon('x')}</span><span><b>Retirer de l’album</b></span></button>` : ''}
+    </div>
+  `, {
+    onMount: (b) => $$('[data-to]', b).forEach((btn) => btn.addEventListener('click', async () => {
+      const to = btn.dataset.to;
+      closeSheet();
+      if (to === 'new') { setTimeout(() => newAlbum(ids), 300); return; }
+      try {
+        const r = await Vault.moveToAlbum({ ids, album: to });
+        state.items = r.items;
+        setSelecting(false);
+        renderGallery();
+        haptic('success');
+        toast(to ? `Rangé dans « ${state.albums.find((a) => a.id === to)?.name} »` : 'Retiré de l’album');
+      } catch { toast('Impossible pour le moment.'); }
+    })),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Sortir du coffre : Photos, sauvegarde chiffrée
+// ---------------------------------------------------------------------------
+async function saveToPhotos(ids) {
+  haptic('light');
+  try {
+    const r = await Vault.exportToPhotos({ ids });
+    if (r.denied) { toast('Autorise Planque à ajouter dans Photos (Réglages › Planque).'); return; }
+    if (r.saved) {
+      haptic('success');
+      toast(r.skipped ? `${plural(r.saved, 'élément remis', 'éléments remis')} dans Photos. Les documents, avec Partager.` : `${plural(r.saved, 'élément remis', 'éléments remis')} dans Photos`);
+      setSelecting(false);
+    } else if (r.skipped) {
+      toast('Les documents ne vont pas dans Photos : utilise Partager.');
+    }
+  } catch { toast('Impossible pour le moment.'); }
+}
+
+async function runBackup() {
+  if (!await ensureCreated()) return;
+  haptic('light');
+  try {
+    const r = await Vault.exportBackup();
+    if (r.done) {
+      state.settings.lastBackup = String(r.at || Date.now());
+      haptic('success');
+      toast('Sauvegarde enregistrée');
+      renderBanner();
+    }
+  } catch { toast('La sauvegarde n’a pas abouti.'); }
+}
+
+function lastBackupText() {
+  const last = Number(state.settings.lastBackup || 0);
+  if (!last) return 'Jamais faite';
+  const days = Math.floor((Date.now() - last) / DAY);
+  return days === 0 ? 'Dernière : aujourd’hui' : days === 1 ? 'Dernière : hier' : `Dernière : il y a ${days} jours`;
 }
 
 // ---------------------------------------------------------------------------
@@ -811,10 +1181,10 @@ function confirmDelete(ids, after) {
   haptic('medium');
   const n = ids.length;
   openSheet(`
-    <h3>${n > 1 ? `Supprimer ces ${n} fichiers ?` : 'Supprimer ce fichier ?'}</h3>
-    <p>${n > 1 ? 'Ils seront effacés' : 'Il sera effacé'} de ton coffre pour toujours. Impossible de revenir en arrière.</p>
+    <h3>${n > 1 ? `Supprimer ces ${n} éléments ?` : 'Supprimer cet élément ?'}</h3>
+    <p>${n > 1 ? 'Ils restent' : 'Il reste'} 30 jours dans « Supprimés récemment » de ce coffre, au cas où.</p>
     <div class="actions">
-      <button class="btn danger" id="del-yes">Supprimer définitivement</button>
+      <button class="btn danger" id="del-yes">${n > 1 ? `Supprimer ${n} éléments` : 'Supprimer'}</button>
       <button class="btn ghost" id="del-no">Annuler</button>
     </div>
   `, {
@@ -825,12 +1195,51 @@ function confirmDelete(ids, after) {
         try {
           const { items } = await Vault.remove({ ids });
           state.items = items;
-          ids.forEach((id) => state.thumbs.delete(id));
           setSelecting(false);
           renderGallery();
           haptic('success');
-          toast(n > 1 ? `${n} fichiers supprimés` : 'Fichier supprimé');
+          toast(n > 1 ? `${n} éléments dans Supprimés récemment` : 'Dans Supprimés récemment');
           after?.();
+        } catch { toast('Suppression impossible.'); }
+      };
+    },
+  });
+}
+
+async function restoreItems(ids) {
+  try {
+    const { items } = await Vault.restore({ ids });
+    state.items = items;
+    setSelecting(false);
+    if (!trashed().length) state.album = 'all';
+    renderGallery();
+    haptic('success');
+    toast(ids.length > 1 ? `${ids.length} éléments récupérés` : 'Élément récupéré');
+  } catch { toast('Impossible pour le moment.'); }
+}
+
+function confirmPurge(ids) {
+  const n = ids.length;
+  openSheet(`
+    <h3>${n > 1 ? `Supprimer définitivement ${n} éléments ?` : 'Supprimer définitivement ?'}</h3>
+    <p>Impossible de revenir en arrière, même avec la phrase de secours.</p>
+    <div class="actions">
+      <button class="btn danger" id="pg-yes">Supprimer définitivement</button>
+      <button class="btn ghost" id="pg-no">Annuler</button>
+    </div>
+  `, {
+    onMount: (b) => {
+      $('#pg-no', b).onclick = closeSheet;
+      $('#pg-yes', b).onclick = async () => {
+        closeSheet();
+        try {
+          const { items } = await Vault.remove({ ids, forever: true });
+          state.items = items;
+          ids.forEach((id) => state.thumbs.delete(id));
+          setSelecting(false);
+          if (!trashed().length) state.album = 'all';
+          renderGallery();
+          haptic('success');
         } catch { toast('Suppression impossible.'); }
       };
     },
@@ -846,6 +1255,7 @@ function setupViewer() {
   const img = $('#viewer-img');
   $('#viewer-close').onclick = () => closeViewer();
   $('#viewer-share').onclick = () => { const id = currentViewerId(); if (id) shareItems([id]); };
+  $('#viewer-save').onclick = () => { const id = currentViewerId(); if (id) saveToPhotos([id]); };
   $('#viewer-delete').onclick = () => {
     const id = currentViewerId();
     if (id) confirmDelete([id], () => {
@@ -894,7 +1304,7 @@ function setupViewer() {
 function currentViewerId() { return state.viewer.list[state.viewer.index]; }
 
 function openViewer(id) {
-  state.viewer.list = state.items.filter((i) => i.kind === 'photo').map((i) => i.id);
+  state.viewer.list = visible().filter((i) => i.kind === 'photo').map((i) => i.id);
   state.viewer.index = state.viewer.list.indexOf(id);
   $('#viewer').classList.remove('chrome-off');
   $('#viewer').classList.add('show');
@@ -911,7 +1321,7 @@ async function loadViewer() {
   img.style.transform = '';
   img.removeAttribute('src');
   $('#viewer-spin').style.display = 'block';
-  $('#viewer-meta').textContent = `${state.viewer.index + 1} / ${state.viewer.list.length}${item ? ' · ' + fmtDate(item.added) : ''}`;
+  $('#viewer-meta').textContent = `${state.viewer.index + 1} / ${state.viewer.list.length}${item ? ' · ' + fmtDate(when(item)) : ''}`;
   const thumb = state.thumbs.get(id);
   if (thumb) img.src = thumb;
   try {
@@ -937,43 +1347,65 @@ function closeViewer(silent) {
 // ---------------------------------------------------------------------------
 async function openSettings() {
   haptic('light');
-  const size = state.items.reduce((a, i) => a + (i.size || 0), 0);
+  const items = alive();
+  const size = items.reduce((a, i) => a + (i.size || 0), 0);
   const ask = state.settings.askDeleteOriginals !== 'no';
   const faceOn = localStorage.getItem(FACEID) === '1';
+  const downOn = localStorage.getItem(FACEDOWN) === '1';
   let bio = { available: false, type: 'none' };
   try { bio = await Vault.biometry(); } catch { /* indisponible */ }
   const bioName = bio.type === 'faceID' ? 'Face ID' : bio.type === 'touchID' ? 'Touch ID' : 'Code de l’iPhone';
+  const t = trashed().length;
   openSheet(`
     <div class="row-mascot">
       <div data-noisette="awake" data-size="54"></div>
-      <div class="txt"><h3>Ce coffre</h3><p>${state.items.length ? `${addedText(state.items)}, ${fmtSize(size)}` : 'Vide pour l’instant'}</p></div>
+      <div class="txt"><h3>Ce coffre</h3><p>${items.length ? `${addedText(items)}, ${fmtSize(size)}` : 'Vide pour l’instant'}</p></div>
     </div>
+
+    <p class="group-label">Ne rien perdre</p>
+    <div class="group">
+      <button class="opt" id="st-backup"><span class="ico blue">${icon('backup')}</span><span><b>Sauvegarde chiffrée</b><small>${lastBackupText()}. À ranger dans Fichiers, iCloud Drive ou sur un ordinateur.</small></span></button>
+      <button class="opt" id="st-phrase"><span class="ico">${icon('phrase')}</span><span><b>Nouvelle phrase de secours</b><small>Si tu as perdu celle de ce coffre</small></span></button>
+      ${t ? `<button class="opt" id="st-trash"><span class="ico gray">${icon('trash')}</span><span><b>Supprimés récemment</b><small>${plural(t, 'élément', 'éléments')}, gardés 30 jours</small></span></button>` : ''}
+    </div>
+
+    <p class="group-label">Sécurité</p>
+    <div class="group">
+      <button class="opt" id="st-opens"><span class="ico teal">${icon('clock')}</span><span><b>Dernières ouvertures</b><small>Repère si quelqu’un connaît tes cachettes</small></span></button>
+      <button class="opt" id="st-rekey"><span class="ico green">${icon('key')}</span><span><b>Changer mes cachettes</b><small>L’ancien parcours n’ouvrira plus ce coffre</small></span></button>
+      <button class="opt" id="st-decoy"><span class="ico purple">${icon('mask')}</span><span><b>Créer un coffre leurre</b><small>Pour le jour où on te force à ouvrir Planque</small></span></button>
+    </div>
+
+    <p class="group-label">Discrétion</p>
     <div class="group">
       <div class="setting">
-        <div class="txt"><b>Supprimer les originaux</b><small>Le proposer après un import depuis Photos</small></div>
-        <button class="switch ${ask ? 'on' : ''}" id="sw-ask" role="switch" aria-checked="${ask}" aria-label="Proposer de supprimer les originaux"></button>
+        <div class="txt"><b>Verrouiller en retournant l’iPhone</b><small>Écran contre la table : le coffre se ferme aussitôt</small></div>
+        <button class="switch ${downOn ? 'on' : ''}" id="sw-down" role="switch" aria-checked="${downOn}" aria-label="Verrouiller en retournant l’iPhone"></button>
       </div>
       <div class="setting">
         <div class="txt"><b>${bioName} à l’ouverture</b><small>En plus des cachettes, pour tous les coffres</small></div>
         <button class="switch ${faceOn ? 'on' : ''}" id="sw-face" role="switch" aria-checked="${faceOn}" aria-label="${bioName} à l’ouverture"></button>
       </div>
+      <div class="setting">
+        <div class="txt"><b>Supprimer les originaux</b><small>Le proposer après un import depuis Photos</small></div>
+        <button class="switch ${ask ? 'on' : ''}" id="sw-ask" role="switch" aria-checked="${ask}" aria-label="Proposer de supprimer les originaux"></button>
+      </div>
     </div>
     <div class="group">
-      <button class="opt" id="new-phrase"><span class="ico">${icon('phrase')}</span><span><b>Nouvelle phrase de secours</b><small>Si tu as perdu celle de ce coffre</small></span></button>
-      <button class="opt" id="info-decoy"><span class="ico purple">${icon('mask')}</span><span><b>Créer un coffre leurre</b><small>Pour le jour où on te force à ouvrir Planque</small></span></button>
-      <button class="opt" id="info-security"><span class="ico green">${icon('shield')}</span><span><b>Comment tes fichiers sont protégés</b></span></button>
+      <button class="opt" id="st-icon"><span class="ico gray">${icon('apps')}</span><span><b>Icône de l’app</b><small>Une icône plus discrète sur l’écran d’accueil</small></span></button>
+      <button class="opt" id="st-security"><span class="ico green">${icon('shield')}</span><span><b>Comment tes fichiers sont protégés</b></span></button>
     </div>
+
     <div class="actions" style="margin-top:18px">
       <button class="btn danger small" id="destroy">Effacer ce coffre</button>
     </div>
   `, {
     onMount: (body) => {
+      const toggle = (el, on) => { el.classList.toggle('on', on); el.setAttribute('aria-checked', on); haptic('select'); };
       $('#sw-ask', body).onclick = async (e) => {
         const el = e.currentTarget;
         const on = !el.classList.contains('on');
-        el.classList.toggle('on', on);
-        el.setAttribute('aria-checked', on);
-        haptic('select');
+        toggle(el, on);
         state.settings.askDeleteOriginals = on ? 'yes' : 'no';
         try { await Vault.setSetting({ key: 'askDeleteOriginals', value: on ? 'yes' : 'no' }); } catch { /* coffre non créé */ }
       };
@@ -985,16 +1417,78 @@ async function openSettings() {
           if (!r.ok) return;
           if (r.available === false && isNative) { toast('Active un code sur ton iPhone pour utiliser ce verrou.'); return; }
         }
-        el.classList.toggle('on', on);
-        el.setAttribute('aria-checked', on);
-        haptic('select');
+        toggle(el, on);
         if (on) localStorage.setItem(FACEID, '1'); else localStorage.removeItem(FACEID);
       };
-      $('#new-phrase', body).onclick = confirmNewPhrase;
-      $('#info-decoy', body).onclick = showDecoyInfo;
-      $('#info-security', body).onclick = showSecurityInfo;
+      $('#sw-down', body).onclick = async (e) => {
+        const el = e.currentTarget;
+        const on = !el.classList.contains('on');
+        toggle(el, on);
+        if (on) localStorage.setItem(FACEDOWN, '1'); else localStorage.removeItem(FACEDOWN);
+        Vault.setFaceDownLock({ on }).catch(() => {});
+        if (on && !isNative) toast('Fonctionne dans l’app iPhone');
+      };
+      $('#st-backup', body).onclick = () => { closeSheet(); setTimeout(runBackup, 300); };
+      $('#st-phrase', body).onclick = confirmNewPhrase;
+      if (t) $('#st-trash', body).onclick = () => { closeSheet(); setSelecting(false); state.album = 'trash'; renderGallery(); };
+      $('#st-opens', body).onclick = showOpens;
+      $('#st-rekey', body).onclick = () => {
+        if (state.isNew) { toast('Ajoute d’abord un fichier pour créer ce coffre.'); return; }
+        closeSheet();
+        startSecret('rekey1');
+      };
+      $('#st-decoy', body).onclick = showDecoyInfo;
+      $('#st-icon', body).onclick = pickIcon;
+      $('#st-security', body).onclick = showSecurityInfo;
       $('#destroy', body).onclick = confirmDestroy;
     },
+  });
+}
+
+function showOpens() {
+  const fmt = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+  const list = state.opens.slice(0, 20);
+  openSheet(`
+    <div class="row-mascot">
+      <div data-noisette="think" data-size="54"></div>
+      <div class="txt"><h3>Dernières ouvertures</h3><p>De ce coffre uniquement</p></div>
+    </div>
+    <div class="group opens">
+      ${list.map((t, i) => `<div class="setting"><div class="txt"><b>${esc(fmt.format(new Date(t)))}</b>${i === 0 ? '<small>Celle-ci</small>' : ''}</div></div>`).join('') || '<div class="setting"><div class="txt"><small>Aucune ouverture depuis la création de ce coffre.</small></div></div>'}
+    </div>
+    <div class="note">Une ouverture que tu ne reconnais pas ? Quelqu’un connaît tes cachettes. Change-les tout de suite : l’ancien parcours n’ouvrira plus rien.</div>
+    <div class="actions">
+      <button class="btn" id="op-rekey">Changer mes cachettes</button>
+      <button class="btn ghost" id="op-close">Fermer</button>
+    </div>
+  `, {
+    onMount: (b) => {
+      $('#op-close', b).onclick = closeSheet;
+      $('#op-rekey', b).onclick = () => {
+        if (state.isNew) { toast('Ajoute d’abord un fichier pour créer ce coffre.'); return; }
+        closeSheet();
+        startSecret('rekey1');
+      };
+    },
+  });
+}
+
+async function pickIcon() {
+  let cur = { name: 'default', supported: false };
+  try { cur = await Vault.getIcon(); } catch { /* indisponible */ }
+  const icons = [['default', 'Noisette', 'img/icon-default.png'], ['AppIconLune', 'Lune', 'img/icon-lune.png'], ['AppIconForet', 'Sapin', 'img/icon-foret.png']];
+  openSheet(`
+    <h3>Icône de l’app</h3>
+    <p>Une icône plus neutre sur ton écran d’accueil. Le nom « Planque » reste écrit dessous.</p>
+    <div class="icon-pick">
+      ${icons.map(([id, label, src]) => `<button class="${cur.name === id ? 'on' : ''}" data-icon-name="${id}"${cur.supported ? '' : ' disabled'}><img src="${src}" alt=""><span>${label}</span></button>`).join('')}
+    </div>
+    ${cur.supported ? '' : '<div class="note">Disponible dans l’app iPhone.</div>'}
+  `, {
+    onMount: (b) => $$('[data-icon-name]', b).forEach((btn) => btn.addEventListener('click', async () => {
+      const r = await Vault.setIcon({ name: btn.dataset.iconName }).catch(() => ({ ok: false }));
+      if (r.ok) { $$('[data-icon-name]', b).forEach((x) => x.classList.toggle('on', x === btn)); haptic('success'); }
+    })),
   });
 }
 
@@ -1043,7 +1537,7 @@ function showSecurityInfo() {
     <p>Chaque fichier est chiffré en AES-256 sur ton iPhone dès son arrivée. Les noms, les dates et les miniatures aussi.</p>
     <p>La clé vient de tes cachettes et d’une clé rangée dans la puce de sécurité de ton iPhone, d’où elle ne peut pas sortir. Chaque essai doit donc passer par ton iPhone : copier tes fichiers ailleurs ne sert à rien.</p>
     <p>Pas de compte, pas de serveur : personne d’autre que toi ne peut ouvrir tes coffres, nous compris.</p>
-    <div class="note"><b>Changer d’iPhone :</b> tes coffres chiffrés suivent la sauvegarde de ton iPhone, mais pas la clé de la puce. Sur le nouvel iPhone, rouvre chaque coffre avec sa phrase de secours.</div>
+    <div class="note"><b>Changer d’iPhone :</b> tes coffres chiffrés suivent la sauvegarde de ton iPhone, ou ta sauvegarde chiffrée Planque. La clé de la puce, elle, reste sur l’ancien. Sur le nouvel iPhone, rouvre chaque coffre avec sa phrase de secours.</div>
     <div class="actions"><button class="btn ghost" id="back">Fermer</button></div>
   `, { onMount: (b) => { $('#back', b).onclick = closeSheet; } });
 }
@@ -1051,7 +1545,7 @@ function showSecurityInfo() {
 function confirmDestroy() {
   openSheet(`
     <h3>Effacer ce coffre ?</h3>
-    <p>${state.items.length ? `Les ${plural(state.items.length, 'fichier', 'fichiers')} de ce coffre seront effacés pour toujours.` : 'Ce coffre sera effacé.'} Les autres coffres ne sont pas touchés.</p>
+    <p>${state.items.length ? `Les ${plural(state.items.length, 'élément', 'éléments')} de ce coffre seront effacés pour toujours, sans passer par Supprimés récemment.` : 'Ce coffre sera effacé.'} Les autres coffres ne sont pas touchés.</p>
     <div class="actions">
       <button class="btn danger" id="destroy-yes">Effacer pour toujours</button>
       <button class="btn ghost" id="destroy-no">Annuler</button>

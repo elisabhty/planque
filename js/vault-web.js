@@ -189,7 +189,21 @@ export class WebVault {
       } catch { /* coffre vide, sans erreur */ }
     }
     this.s = s;
-    return { items: s.index.items, isNew: !s.persisted, settings: s.index.settings };
+    if (s.persisted) {
+      const now = Date.now();
+      s.index.opens = [...(s.index.opens || []), now].slice(-30);
+      const expired = s.index.items.filter((i) => i.deleted && i.deleted < now - 30 * 864e5).map((i) => i.id);
+      if (expired.length) await this.purge(expired);
+      await this.saveIndex();
+    }
+    return { items: s.index.items, isNew: !s.persisted, settings: s.index.settings, albums: s.index.albums || [], opens: [...(s.index.opens || [])].reverse() };
+  }
+
+  async purge(ids) {
+    const s = this.s;
+    const set = new Set(ids);
+    s.index.items = s.index.items.filter((i) => !set.has(i.id));
+    for (const id of ids) { await del(`v:${s.vaultId}:b:${id}`); await del(`v:${s.vaultId}:t:${id}`); }
   }
 
   async confirmNew({ nuts }) {
@@ -309,7 +323,7 @@ export class WebVault {
         id, kind, mime: f.type,
         name: dot > 0 ? f.name.slice(0, dot) : f.name,
         ext: dot > 0 ? f.name.slice(dot + 1).toLowerCase() : '',
-        size: f.size, added: Date.now(), hasThumb: !!meta.thumb,
+        size: f.size, added: Date.now(), taken: f.lastModified || undefined, hasThumb: !!meta.thumb,
         width: meta.width, height: meta.height, duration: meta.duration,
       };
       s.index.items.unshift(item);
@@ -337,14 +351,126 @@ export class WebVault {
     return {};
   }
 
-  async remove({ ids }) {
+  async remove({ ids, forever = false }) {
     const s = this.needPersisted();
-    const set = new Set(ids);
-    s.index.items = s.index.items.filter((i) => !set.has(i.id));
+    if (forever) await this.purge(ids);
+    else { const set = new Set(ids); const now = Date.now(); s.index.items.forEach((i) => { if (set.has(i.id)) i.deleted = now; }); }
     await this.saveIndex();
-    for (const id of ids) { await del(`v:${s.vaultId}:b:${id}`); await del(`v:${s.vaultId}:t:${id}`); }
     return { items: s.index.items };
   }
+
+  async restore({ ids }) {
+    const s = this.needPersisted();
+    const set = new Set(ids);
+    s.index.items.forEach((i) => { if (set.has(i.id)) delete i.deleted; });
+    await this.saveIndex();
+    return { items: s.index.items };
+  }
+
+  async createAlbum({ name }) {
+    const s = this.needPersisted();
+    const n = String(name || '').trim().slice(0, 40);
+    if (!n) throw Object.assign(new Error('Donne un nom à l’album.'), { code: 'IO' });
+    const album = { id: crypto.randomUUID(), name: n };
+    s.index.albums = [...(s.index.albums || []), album];
+    await this.saveIndex();
+    return { album, albums: s.index.albums };
+  }
+
+  async renameAlbum({ id, name }) {
+    const s = this.needPersisted();
+    const n = String(name || '').trim().slice(0, 40);
+    if (!n) throw Object.assign(new Error('Donne un nom à l’album.'), { code: 'IO' });
+    (s.index.albums || []).forEach((a) => { if (a.id === id) a.name = n; });
+    await this.saveIndex();
+    return { albums: s.index.albums || [] };
+  }
+
+  async deleteAlbum({ id }) {
+    const s = this.needPersisted();
+    s.index.albums = (s.index.albums || []).filter((a) => a.id !== id);
+    s.index.items.forEach((i) => { if (i.album === id) delete i.album; });
+    await this.saveIndex();
+    return { albums: s.index.albums, items: s.index.items };
+  }
+
+  async moveToAlbum({ ids, album }) {
+    const s = this.needPersisted();
+    const set = new Set(ids);
+    s.index.items.forEach((i) => { if (set.has(i.id)) { if (album) i.album = album; else delete i.album; } });
+    await this.saveIndex();
+    return { items: s.index.items };
+  }
+
+  async exportToPhotos({ ids }) {
+    let saved = 0, skipped = 0;
+    for (const id of ids) {
+      const { item } = await this.raw(id);
+      if (item.kind === 'file') { skipped++; continue; }
+      await this.share({ ids: [id] });
+      saved++;
+    }
+    return { saved, skipped };
+  }
+
+  // Sauvegarde : toutes les entrées chiffrées du coffre, telles quelles (simulation du fichier .planque).
+  async exportBackup() {
+    const s = this.needPersisted();
+    const prefix = `v:${s.vaultId}:`;
+    const entries = {};
+    for (const k of await keysWithPrefix(prefix)) {
+      const v = await get(k);
+      entries[k.slice(prefix.length)] = typeof v === 'string' ? { s: v } : { b: btoa(String.fromCharCode(...new Uint8Array(v))) };
+    }
+    const blob = new Blob([JSON.stringify({ magic: 'PLQBAK1', entries })], { type: 'application/octet-stream' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `Planque-${new Date().toISOString().slice(0, 10)}.planque`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    const at = Date.now();
+    s.index.settings.lastBackup = String(at);
+    await this.saveIndex();
+    return { done: true, at };
+  }
+
+  async importBackup() {
+    const [file] = await pickFiles({ accept: '.planque,application/octet-stream' });
+    if (!file) return { imported: false };
+    let data;
+    try { data = JSON.parse(await file.text()); } catch { data = null; }
+    if (!data || data.magic !== 'PLQBAK1' || !data.entries?.rid || !data.entries?.rec) {
+      return { imported: false, error: 'Ce fichier n’est pas une sauvegarde Planque, ou il est abîmé.' };
+    }
+    for (const k of await keysWithPrefix('v:')) {
+      if (k.endsWith(':rid') && (await get(k)) === data.entries.rid.s) return { imported: true, already: true };
+    }
+    const id = hex(rand(16));
+    for (const [name, v] of Object.entries(data.entries)) {
+      const val = v.s !== undefined ? v.s : Uint8Array.from(atob(v.b), (c) => c.charCodeAt(0)).buffer;
+      await put(`v:${id}:${name}`, val);
+    }
+    return { imported: true, already: false };
+  }
+
+  async rekey({ nuts }) {
+    this.check(nuts);
+    const s = this.needPersisted();
+    const { kek, vaultId } = await this.derive(nuts);
+    if (vaultId === s.vaultId) return this.unlock({ nuts });
+    if (await get(`v:${vaultId}:key`)) throw Object.assign(new Error('Ces cachettes ouvrent déjà un autre coffre. Choisis-en d’autres.'), { code: 'IO' });
+    for (const k of await keysWithPrefix(`v:${s.vaultId}:`)) {
+      await put(k.replace(`v:${s.vaultId}:`, `v:${vaultId}:`), await get(k));
+      await del(k);
+    }
+    const raw = await crypto.subtle.exportKey('raw', s.master);
+    await put(`v:${vaultId}:key`, await seal(kek, raw, `plq-key|${vaultId}`));
+    return this.unlock({ nuts });
+  }
+
+  async setFaceDownLock() { return {}; }
+  async setIcon() { return { ok: false }; }
+  async getIcon() { return { name: 'default', supported: false }; }
 
   async setSetting({ key, value }) { const s = this.need(); s.index.settings[key] = value; await this.saveIndex(); return {}; }
 
