@@ -1,6 +1,6 @@
 import { Vault, haptic, isNative } from './vault.js';
 import { Forest, MIN_NUTS, strength, forestSVG, miniSVG } from './forest.js';
-import { noisetteSVG, setNoisette, lookAt, resetLook } from './noisette.js';
+import { noisetteHTML, setNoisette, lookAt, resetLook } from './noisette.js';
 import { entropyToWords, wordsToEntropy, countKnown, suggest, choices } from './mnemonic.js';
 
 // ---------------------------------------------------------------------------
@@ -56,7 +56,7 @@ function hydrate(root = document) {
   });
   $$('[data-noisette]', root).forEach((el) => {
     if (el.dataset.hydrated) return;
-    el.innerHTML = noisetteSVG({ state: el.dataset.noisette, size: +el.dataset.size || 160 });
+    el.innerHTML = noisetteHTML({ state: el.dataset.noisette, size: +el.dataset.size || 160 });
     el.dataset.hydrated = '1';
   });
 }

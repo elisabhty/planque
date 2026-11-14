@@ -8,7 +8,7 @@ Photos, vidéos et documents chiffrés en AES-256 sur l'iPhone. La clé vient de
 ## Ce qui est fait
 
 - **Onboarding** : bienvenue, trois choses à savoir, choix des cachettes (deux fois), phrase de secours avec vérification.
-- **La forêt** : 36 cachettes illustrées (trous du chêne, nichoir, lanterne, lune, terrier, botte…). Noisette se réveille, suit des yeux chaque noisette et juge la solidité du parcours. Même réaction pour tous les parcours.
+- **La forêt** : 36 cachettes illustrées (trous du chêne, nichoir, lanterne, lune, terrier, botte…). Noisette se réveille, se penche vers chaque noisette et juge la solidité du parcours. Même réaction pour tous les parcours.
 - **Phrase de secours** : 12 mots (BIP39, liste française), pour les cachettes oubliées et les changements d'iPhone. Saisie sans accents ni majuscules, avec suggestions.
 - **Face ID** (option) avant la forêt.
 - **Ne rien perdre** : sauvegarde chiffrée en un fichier `.planque` (à ranger dans Fichiers / iCloud Drive), restauration sur n'importe quel iPhone avec la phrase de secours, « Supprimés récemment » pendant 30 jours, remise dans Photos avec les fichiers d'origine, rappel de sauvegarde.
@@ -47,7 +47,8 @@ L'interface tourne avec un coffre **simulé** (WebCrypto + IndexedDB, mêmes rè
 ```
 www/                      Interface (HTML/CSS/JS, sans framework)
   js/app.js               Écrans, galerie, import, visionneuse, réglages
-  js/noisette.js          La mascotte (SVG animé, 5 états)
+  js/noisette.js          La mascotte (3 expressions superposées, 5 états animés)
+  img/noisette/           awake.webp, sleep.webp, joy.webp (fond transparent, 480 px)
   js/forest.js            La forêt et ses 36 cachettes (⚠️ ne jamais renuméroter)
   js/mnemonic.js          Phrase de secours (BIP39) ; js/words-fr.js : la liste de mots
   js/vault.js             Pont vers le plugin natif (ou la simulation)
@@ -60,7 +61,7 @@ SECURITE.md               Ce que le chiffrement protège, et ses limites
 
 ## Remplacer Noisette par tes propres visuels
 
-Noisette est un SVG dessiné en code (`www/js/noisette.js`), avec des états animés en CSS (`.is-sleep`, `.is-awake`, `.is-think`, `.is-stash`, `.is-happy` dans `www/css/app.css`). Pour passer à tes vidéos ou images générées, remplace le contenu de `noisetteSVG()` par une balise `<video>`/`<img>` par état : le reste de l'appli appelle seulement `setNoisette(el, 'état')`.
+Noisette, c'est trois images détourées de la même illustration (`www/img/noisette/` : yeux ouverts, endormie, contente), empilées dans `noisetteHTML()` (`www/js/noisette.js`). Les états sont en CSS (`.is-sleep`, `.is-awake`, `.is-think`, `.is-stash`, `.is-happy` dans `www/css/app.css`) : l'état choisit l'expression visible et l'animation (respiration et « z », clignement, tête penchée, mâchonnement, petit saut). Pour passer à des vidéos animées, ajoute une balise `<video>` par état dans `noisetteHTML()` : le reste de l'appli appelle seulement `setNoisette(el, 'état')`. L'icône, l'écran de lancement et le cache de confidentialité utilisent la même illustration.
 L'icône, l'écran de lancement et le cache du sélecteur d'applis sont dans `ios/App/App/Assets.xcassets`.
 
 ## Étapes suivantes

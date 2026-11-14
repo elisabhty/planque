@@ -281,60 +281,59 @@ h3 { font-size: 22px; line-height: 28px; letter-spacing: .35px; }
 @keyframes shake { 20%, 60% { transform: translateX(-7px); } 40%, 80% { transform: translateX(7px); } }
 
 /* ---------- Noisette (mascotte) ---------- */
-.noisette { overflow: visible; display: block; }
-.noisette * { transform-box: fill-box; }
-.noisette .nz-tail { transform-origin: 10% 90%; animation: nz-tail 4.5s ease-in-out infinite; }
-.noisette .nz-body { transform-origin: 50% 100%; }
-.noisette .nz-head { transform-origin: 50% 85%; transition: transform .4s var(--ease); }
-.noisette .nz-ear { transform-origin: 50% 100%; }
-.noisette .nz-eye { transform-origin: center; }
-.noisette .nz-look { transition: transform .12s linear; }
-.noisette .nz-lids, .noisette .nz-joy, .noisette .nz-zzz { opacity: 0; transition: opacity .25s; }
-.noisette .nz-eyes { transition: opacity .2s; }
-.noisette .nz-pouch { transform-origin: center; transform: scale(.4); transition: transform .35s var(--ease); }
-.noisette .nz-nut { transform-origin: center; transition: transform .4s var(--ease), opacity .3s; }
+.noisette { position: relative; display: block; width: var(--nz, 160px); height: var(--nz, 160px); flex: none; }
+.noisette::before { /* ombre au sol */
+  content: ''; position: absolute; left: 22%; right: 14%; bottom: -3%; height: 8%;
+  background: radial-gradient(closest-side, rgba(0, 0, 0, .45), transparent); border-radius: 50%;
+}
+.nz-look { position: absolute; inset: 0; transition: transform .14s linear; transform-origin: 50% 100%; }
+.nz-fig { position: absolute; inset: 0; transform-origin: 55% 100%; transition: transform .45s var(--ease); }
+.nz-fig img {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+  -webkit-user-drag: none; user-select: none; pointer-events: none; transition: opacity .18s;
+}
+.nz-sleep, .nz-joy { opacity: 0; }
+.nz-zzz { position: absolute; right: -24%; top: -6%; width: 36%; height: 38%; pointer-events: none; opacity: 0; transition: opacity .3s; }
+.nz-zzz span {
+  position: absolute; color: #F6E6CC; font: 800 calc(var(--nz, 160px) * .1)/1 ui-rounded, -apple-system, system-ui;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, .5); opacity: 0;
+}
+.nz-zzz span:nth-child(1) { left: 0; bottom: 0; }
+.nz-zzz span:nth-child(2) { left: 32%; bottom: 34%; font-size: calc(var(--nz, 160px) * .13); }
+.nz-zzz span:nth-child(3) { left: 66%; bottom: 68%; font-size: calc(var(--nz, 160px) * .16); }
 
-.noisette.is-sleep .nz-eyes { opacity: 0; }
-.noisette.is-sleep .nz-lids { opacity: 1; }
-.noisette.is-sleep .nz-body { animation: nz-breathe 3.6s ease-in-out infinite; }
-.noisette.is-sleep .nz-head { transform: rotate(-4deg) translateY(2px); }
+.noisette.is-sleep .nz-awake { opacity: 0; }
+.noisette.is-sleep .nz-sleep { opacity: 1; }
+.noisette.is-sleep .nz-fig { transform: rotate(-3deg); animation: nz-breathe 3.6s ease-in-out infinite; }
 .noisette.is-sleep .nz-zzz { opacity: 1; }
-.noisette.is-sleep .nz-zzz text { animation: nz-z 3s ease-in-out infinite; opacity: 0; }
-.noisette.is-sleep .nz-zzz text:nth-child(2) { animation-delay: .5s; }
-.noisette.is-sleep .nz-zzz text:nth-child(3) { animation-delay: 1s; }
+.noisette.is-sleep .nz-zzz span { animation: nz-z 3s ease-in-out infinite; }
+.noisette.is-sleep .nz-zzz span:nth-child(2) { animation-delay: .5s; }
+.noisette.is-sleep .nz-zzz span:nth-child(3) { animation-delay: 1s; }
 
-.noisette.is-awake .nz-eye { animation: nz-blink 4.2s infinite; }
-.noisette.is-awake .nz-ear { animation: nz-ear 5s ease-in-out infinite; }
+.noisette.is-awake .nz-fig { animation: nz-idle 4s ease-in-out infinite; }
+.noisette.is-awake .nz-sleep { animation: nz-blink 4.2s infinite; }
 
-.noisette.is-think .nz-head { animation: nz-tilt 1.1s ease-in-out infinite; }
-.noisette.is-think .nz-ear-l { animation: nz-twitch .55s ease-in-out infinite; }
-.noisette.is-think .nz-ear-r { animation: nz-twitch .55s ease-in-out .27s infinite; }
-.noisette.is-think .nz-look { transform: translate(1.5px, -2.5px); }
+.noisette.is-think .nz-fig { animation: nz-tilt 1.1s ease-in-out infinite; }
+.noisette.is-think .nz-look { transform: translateY(-2%); }
 
-.noisette.is-stash .nz-pouch { transform: scale(1.12); }
-.noisette.is-stash .nz-nut { animation: nz-gobble 1.2s var(--ease) infinite; }
-.noisette.is-stash .nz-body { animation: nz-munch .3s ease-in-out infinite; }
-.noisette.is-stash .nz-eye { transform: scaleY(.55); }
+.noisette.is-stash .nz-fig { animation: nz-munch .32s ease-in-out infinite; }
+.noisette.is-stash .nz-sleep { animation: nz-blink 1.6s infinite; }
 
-.noisette.is-happy .nz-eyes { opacity: 0; }
+.noisette.is-happy .nz-awake { opacity: 0; }
 .noisette.is-happy .nz-joy { opacity: 1; }
-.noisette.is-happy .nz-body { animation: nz-hop .7s var(--ease) 2; }
-.noisette.is-happy .nz-tail { animation: nz-wag .35s ease-in-out 4; }
+.noisette.is-happy .nz-fig { animation: nz-hop .7s var(--ease) 2; }
 
-@keyframes nz-tail { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(-4deg); } }
-@keyframes nz-wag { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(-9deg); } }
-@keyframes nz-breathe { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.015, 1.03); } }
+@keyframes nz-breathe { 0%, 100% { transform: rotate(-3deg) scale(1, 1); } 50% { transform: rotate(-3deg) scale(1.012, 1.028); } }
+@keyframes nz-idle { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.006, 1.014); } }
 @keyframes nz-z { 0% { opacity: 0; transform: translate(-6px, 8px); } 30% { opacity: .9; } 100% { opacity: 0; transform: translate(4px, -10px); } }
-@keyframes nz-blink { 0%, 46%, 50%, 100% { transform: scaleY(1); } 48% { transform: scaleY(.08); } }
-@keyframes nz-ear { 0%, 80%, 100% { transform: rotate(0); } 85% { transform: rotate(-8deg); } 90% { transform: rotate(4deg); } }
-@keyframes nz-twitch { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(-10deg); } }
-@keyframes nz-tilt { 0%, 100% { transform: rotate(-5deg); } 50% { transform: rotate(5deg); } }
-@keyframes nz-gobble { 0% { transform: translateY(0) scale(1); opacity: 1; } 55% { transform: translateY(-26px) scale(.7); opacity: 1; } 70% { transform: translateY(-30px) scale(.3); opacity: 0; } 71% { transform: translateY(6px) scale(1); opacity: 0; } 100% { transform: translateY(0) scale(1); opacity: 1; } }
-@keyframes nz-munch { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.02, .985); } }
-@keyframes nz-hop { 0%, 100% { transform: translateY(0); } 40% { transform: translateY(-14px) scale(1.02, .98); } 70% { transform: translateY(0) scale(1.03, .96); } }
+@keyframes nz-blink { 0%, 45.5%, 49.5%, 100% { opacity: 0; } 46.5%, 48.5% { opacity: 1; } }
+@keyframes nz-tilt { 0%, 100% { transform: rotate(-5deg); } 50% { transform: rotate(4deg); } }
+@keyframes nz-munch { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.025, .975); } }
+@keyframes nz-hop { 0%, 100% { transform: translateY(0); } 40% { transform: translateY(-12%) scale(1.02, .98); } 70% { transform: translateY(0) scale(1.03, .96); } }
 
 @media (prefers-reduced-motion: reduce) {
   .noisette *, .screen, .how { animation: none !important; transition: none !important; }
+  .noisette.is-sleep .nz-zzz span { opacity: .8; }
 }
 
 
