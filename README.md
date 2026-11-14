@@ -43,6 +43,10 @@ npx serve www
 
 L'interface tourne avec un coffre **simulé** (WebCrypto + IndexedDB, mêmes règles de chiffrement). Pratique pour travailler le design ; le vrai chiffrement, c'est le plugin Swift sur iPhone.
 
+## Mettre en ligne l'aperçu (GitHub Pages)
+
+Avant chaque mise en ligne : `python3 tools/version.py`. Il ajoute un numéro de version à la feuille de style et à chaque fichier JavaScript : sans ça, Safari peut mélanger d'anciens fichiers en cache avec la nouvelle page (écran noir). Si l'appli ne démarre pas au bout de 6 secondes, un bouton « Recharger » s'affiche.
+
 ## Structure
 
 ```

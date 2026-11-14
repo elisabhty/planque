@@ -1,5 +1,5 @@
 // Pont vers le coffre : plugin natif sur iPhone, simulation chiffrée dans le navigateur (aperçu).
-import { WebVault } from './vault-web.js';
+import { WebVault } from './vault-web.js?v=20261114a';
 
 const C = window.Capacitor;
 export const isNative = !!(C && typeof C.isNativePlatform === 'function' && C.isNativePlatform() && C.nativePromise);

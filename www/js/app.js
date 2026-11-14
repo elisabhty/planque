@@ -1,8 +1,8 @@
-import { Vault, haptic, isNative } from './vault.js';
-import { Dial, COMBO_LEN, weakCombo, dialSVG } from './dial.js';
-import qrcode from './vendor/qrcode.js';
-import { noisetteHTML, setNoisette, lookAt, resetLook } from './noisette.js';
-import { entropyToWords, wordsToEntropy, countKnown, suggest, choices } from './mnemonic.js';
+import { Vault, haptic, isNative } from './vault.js?v=20261114a';
+import { Dial, COMBO_LEN, weakCombo, dialSVG } from './dial.js?v=20261114a';
+import qrcode from './vendor/qrcode.js?v=20261114a';
+import { noisetteHTML, setNoisette, lookAt, resetLook } from './noisette.js?v=20261114a';
+import { entropyToWords, wordsToEntropy, countKnown, suggest, choices } from './mnemonic.js?v=20261114a';
 
 // ---------------------------------------------------------------------------
 // Icônes
