@@ -1,12 +1,12 @@
 # Planque — comment le coffre est protégé
 
-Ce document décrit ce que fait vraiment le code (`ios/App/App/VaultPlugin.swift`), et ce qu'il ne fait pas. Il sert de base à l'audit à faire avant toute communication du type « inviolable ».
+Ce document décrit ce que fait vraiment le code (`ios/App/App/VaultPlugin.swift` et `Cadran.swift`), et ce qu'il ne fait pas. Il sert de base à l'audit à faire avant toute communication du type « inviolable ».
 
-## Le secret : les cachettes de Noisette
+## Le secret : la combinaison du cadran
 
-- Une forêt illustrée avec **36 cachettes**. Le secret est la **suite ordonnée** des cachettes touchées : de 5 à 16 noisettes, et une cachette peut servir plusieurs fois.
-- Espace : 36⁵ ≈ 60 millions de suites à 5 noisettes, 36⁶ ≈ 2,2 milliards à 6, 36⁸ ≈ 2 800 milliards à 8. L'appli recommande 6 noisettes ou plus, et Noisette signale les parcours trop simples (répétitions, même cachette deux fois de suite).
-- Les numéros des cachettes font partie de la clé (`www/js/forest.js`) : on peut redessiner la forêt, mais **jamais renuméroter** les cachettes après la mise en ligne.
+- Un cadran de coffre-fort de **100 crans** (0 à 99). Le secret est une **combinaison de 4 nombres** : 100⁴ = **100 millions** de combinaisons (100 fois plus qu'un code à 6 chiffres).
+- À la création, l'appli refuse les combinaisons évidentes : quatre fois le même nombre, suites régulières (10-20-30-40, 5-6-7-8…), motifs répétés (12-34-12-34).
+- Chaîne dérivée : `plq3|cadran100|a-b-c-d`. Changer ce format rend les coffres existants illisibles : à ne pas modifier après la mise en ligne.
 
 ## Les clés
 
@@ -16,19 +16,30 @@ Ce document décrit ce que fait vraiment le code (`ios/App/App/VaultPlugin.swift
    - `pre` → clé P-256 éphémère → **accord ECDH avec la clé de la puce** → secret partagé ;
    - HKDF-SHA256(secret partagé, sel = `pre`) → 64 octets : clé d'enveloppe (KEK) + localisateur (→ SHA-256 → nom du dossier du coffre).
 
-   Chaque essai doit donc passer par la puce de **cet** iPhone : une copie des fichiers ne permet pas de tester des cachettes ailleurs, même avec une ferme de serveurs.
+   Chaque essai doit donc passer par la puce de **cet** iPhone : une copie des fichiers ne permet pas de tester des combinaisons ailleurs, même avec une ferme de serveurs.
 3. **Clé maîtresse** : 256 bits aléatoires par coffre, enveloppée deux fois en AES-256-GCM :
-   - par la KEK des cachettes (`key.bin`) ;
-   - par la **phrase de secours** (`rec.bin`).
+   - par la KEK de la combinaison (`key.bin`) ;
+   - par la **clé de secours** de la carte-clé (`rec.bin`).
 
-## La phrase de secours
+## Frein aux essais (sur l'iPhone)
 
-- 12 mots, norme BIP39 (liste officielle française), soit 128 bits aléatoires et une somme de contrôle. Elle est créée pour chaque coffre et montrée **une seule fois**, avec une vérification de deux mots.
-- HKDF(phrase) → clé d'enveloppe de secours + identifiant (`rid`, une empreinte qui ne révèle rien). La phrase ne dépend pas de l'appareil, et 128 bits sont hors de portée d'une attaque par force brute, même hors de l'iPhone.
+- Une combinaison qui n'ouvre aucun coffre existant compte comme un essai raté. Le compteur est dans le **trousseau** (il survit à une désinstallation de l'appli).
+- À partir de 5 essais ratés : attente de 30 s, puis 1 min, 5 min, 15 min, et 1 h par essai. Le compteur baisse d'un cran par heure sans essai raté.
+- Ouvrir un coffre ne remet **pas** le compteur à zéro : alterner avec le coffre leurre ne permet pas de contourner le frein.
+- Résultat : tester les 100 millions de combinaisons sur l'iPhone prendrait des milliers d'années ; hors de l'iPhone, c'est impossible (puce de sécurité).
+- Le frein ne trahit pas le leurre : il ne se déclenche qu'après des combinaisons qui ont déjà affiché un coffre vide.
+
+## La carte-clé de secours
+
+- 128 bits aléatoires par coffre, présentés de deux façons sur une même carte (image à imprimer ou à ranger hors de l'iPhone) :
+  - un **QR code** (`PLQR1.` + les 16 octets en base64url), scanné par l'appli ;
+  - les **12 mots** BIP39 équivalents (liste officielle française), pour une saisie à la main.
+- La carte est montrée **une seule fois**. L'enregistrement dans Photos est retiré de la feuille de partage (la pellicule finit souvent dans iCloud). Qui recopie les mots à la main passe une vérification de deux mots.
+- HKDF(clé de secours) → clé d'enveloppe de secours + identifiant (`rid`, une empreinte qui ne révèle rien). Elle ne dépend pas de l'appareil, et 128 bits sont hors de portée d'une attaque par force brute.
 - Elle sert à deux choses :
-  - **cachettes oubliées** : on saisit la phrase, puis on choisit de nouvelles cachettes, et l'ancien parcours n'ouvre plus rien ;
-  - **nouvel iPhone** : les coffres chiffrés arrivent avec la sauvegarde de l'iPhone, mais la clé de la puce ne suit pas. On rouvre chaque coffre avec sa phrase, et une nouvelle clé de puce est créée.
-- On peut générer une **nouvelle phrase** depuis les réglages du coffre ; l'ancienne cesse alors de marcher.
+  - **combinaison oubliée** : on scanne la carte (ou on tape les mots), puis on choisit une nouvelle combinaison ; l'ancienne n'ouvre plus rien ;
+  - **nouvel iPhone** : les coffres chiffrés arrivent avec la sauvegarde de l'iPhone, mais la clé de la puce ne suit pas. On rouvre chaque coffre avec sa carte, et une nouvelle clé de puce est créée.
+- On peut générer une **nouvelle carte** depuis les réglages du coffre ; l'ancienne cesse alors de marcher.
 
 ## Les données
 
@@ -44,36 +55,37 @@ Aucune cryptographie maison : CryptoKit (AES-GCM, ECDH P-256, HKDF, SHA-256, Sec
 
 ## Ne jamais perdre ses photos
 
-- **Sauvegarde chiffrée** (fichier `.planque`) : copie telle quelle des fichiers chiffrés du coffre (clé enveloppée, phrase enveloppée, index, fichiers, miniatures), précédée d'un manifeste qui ne contient que des noms techniques (UUID) et des tailles. Aucun nom de photo, aucune date ni aucun album en clair. Le fichier se range où l'on veut (Fichiers, iCloud Drive, ordinateur) et ne s'ouvre qu'avec la **phrase de secours** (128 bits), sur n'importe quel iPhone. À la restauration, chaque chemin est vérifié (pas de sortie du dossier du coffre) et un coffre déjà présent n'est pas dupliqué.
+- **Sauvegarde chiffrée** (fichier `.planque`) : copie telle quelle des fichiers chiffrés du coffre (clé enveloppée, clé de secours enveloppée, index, fichiers, miniatures), précédée d'un manifeste qui ne contient que des noms techniques (UUID) et des tailles. Aucun nom de photo, aucune date ni aucun album en clair. Le fichier se range où l'on veut (Fichiers, iCloud Drive, ordinateur) et ne s'ouvre qu'avec la **carte-clé** (128 bits), sur n'importe quel iPhone. À la restauration, chaque chemin est vérifié (pas de sortie du dossier du coffre) et un coffre déjà présent n'est pas dupliqué.
 - **Supprimés récemment** : un élément supprimé reste 30 jours dans le coffre, chiffré, avant d'être effacé à l'ouverture suivante. « Supprimer définitivement » et « Effacer ce coffre » ne passent pas par là.
 - **Remettre dans Photos** : export des fichiers d'origine (dates et métadonnées conservées), après autorisation « ajout seulement » de Photos.
 - **Rappel** dans la galerie quand il y a au moins 5 éléments et pas de sauvegarde depuis 30 jours (on peut le repousser de 7 jours).
 
 ## Coffres multiples et leurre
 
-- Chaque parcours mène à son propre dossier. Un parcours inconnu ouvre un coffre **vide en mémoire**, sans erreur. Il n'est écrit sur le disque qu'au premier import, après un deuxième passage du même parcours.
-- Même déroulé, même durée minimale (700 ms) et même animation de Noisette pour tous les parcours. Le nombre de coffres n'est affiché nulle part.
+- Chaque combinaison mène à son propre dossier. Une combinaison inconnue ouvre un coffre **vide en mémoire**, sans erreur. Il n'est écrit sur le disque qu'au premier import, après une deuxième saisie de la même combinaison.
+- Même déroulé, même durée minimale (700 ms) et même animation pour toutes les combinaisons. Le nombre de coffres n'est affiché nulle part.
 
 ## Pendant l'utilisation
 
 - Verrouillage dès que l'appli passe en arrière-plan : session et clés effacées, fichiers temporaires supprimés, fenêtres natives fermées.
 - Cache opaque dans le sélecteur d'applis ; en version publiée (Release), aussi pendant un enregistrement ou un partage d'écran.
 - **Verrouiller en retournant l'iPhone** (option) : écran posé contre la table, le coffre se ferme (accéléromètre, aucune autorisation demandée).
-- **Journal des ouvertures** : les 30 dernières ouvertures de **ce** coffre, stockées dans son index chiffré (invisible depuis les autres coffres). Une ouverture inconnue signale que quelqu'un connaît le parcours ; **Changer mes cachettes** ré-enveloppe alors la clé maîtresse avec un nouveau parcours (l'ancien n'ouvre plus rien, les fichiers ne sont pas rechiffrés).
+- **Journal des ouvertures** : les 30 dernières ouvertures de **ce** coffre, stockées dans son index chiffré (invisible depuis les autres coffres). Une ouverture inconnue signale que quelqu'un connaît la combinaison ; **Changer de combinaison** ré-enveloppe alors la clé maîtresse (l'ancienne n'ouvre plus rien, les fichiers ne sont pas rechiffrés).
 - **Icônes discrètes** (Lune, Sapin) via les icônes alternatives d'iOS. Le nom « Planque » reste affiché : iOS ne permet pas de le changer.
-- **Face ID / code de l'iPhone** (option) : verrou d'accès **en plus** des cachettes, avant d'afficher la forêt. Il n'entre pas dans la clé : c'est un garde, pas une partie du chiffrement.
-- À la saisie, une noisette apparaît brièvement sur la cachette touchée, sans laisser de trace du parcours (contrairement à un schéma dessiné).
+- **Ouvrir avec Face ID** (option, par coffre) : la KEK du coffre où l'option est activée est rangée dans le trousseau avec un contrôle d'accès **biométrie actuelle uniquement** (`.biometryCurrentSet`, `WhenPasscodeSetThisDeviceOnly`) : pas de repli sur le code de l'iPhone, clé invalidée si les visages enregistrés changent ou si le code de l'iPhone est retiré. Face ID ouvre toujours ce coffre-là ; la combinaison leurre se tape au cadran. L'appli redemande la combinaison une fois par semaine (rappel, pour ne pas l'oublier).
+- À la saisie, le nombre courant s'affiche au centre du cadran et les nombres validés deviennent des points, sans trace laissée à l'écran.
 - L'import depuis Photos chiffre le fichier fourni par iOS sans copie en clair. Les vidéos et les documents ouverts sont déchiffrés dans un dossier temporaire protégé, effacé à la fermeture ou au verrouillage.
 
 ## Limites connues
 
 - **Appareil compromis ou coffre ouvert** : ce que l'utilisateur voit, un logiciel malveillant ou une personne qui tient l'iPhone ouvert peut le voir. Les clés sont en mémoire tant que le coffre est ouvert.
-- **Regard par-dessus l'épaule** : quelqu'un qui filme ou regarde la saisie peut retenir le parcours.
-- **Essais sur l'iPhone lui-même** : pas de blocage après X essais (ce serait un indice pour le leurre). Chaque essai coûte environ une demi-seconde à une seconde de calcul, plus le passage par la puce. Un parcours de 6 noisettes ou plus rend cette attaque irréaliste ; un parcours de 5 noisettes simples reste le point faible.
+- **Regard par-dessus l'épaule** : quelqu'un qui filme ou regarde la saisie peut retenir la combinaison.
+- **Face ID sous la contrainte** : quelqu'un peut forcer à regarder l'écran. Ne pas activer Face ID si ce risque compte : la combinaison leurre ne marche qu'au cadran.
+- **Carte-clé trouvée** : avec la carte et l'iPhone (ou une sauvegarde `.planque`), on peut rouvrir le coffre. Elle se range comme une clé de maison.
 - **Date de modification de l'index** : chaque ouverture réécrit l'index du coffre (journal). Une expertise du conteneur peut donc voir quel dossier de coffre a servi récemment.
 - **Analyse technique du conteneur** : le nombre de coffres, leur taille et le nombre de fichiers chiffrés sont visibles par quelqu'un qui extrait les fichiers de l'appli. Le leurre résiste à la contrainte humaine (« ouvre l'appli »), pas à une expertise judiciaire.
-- **Cachettes ET phrase perdues = données perdues.** Personne ne peut les récupérer, nous compris.
-- **Changement d'iPhone** : il faut la phrase de chaque coffre.
+- **Combinaison ET carte-clé perdues = données perdues.** Personne ne peut les récupérer, nous compris.
+- **Changement d'iPhone** : il faut la carte-clé de chaque coffre.
 - **Fichiers sortis du coffre** (partage, enregistrement) : ils ne sont plus protégés.
 
 ## Avant de communiquer

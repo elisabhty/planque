@@ -22,7 +22,7 @@
 
     <!-- Accueil -->
     <section class="screen" id="intro">
-      <div class="intro-art" aria-hidden="true"><div id="intro-forest"></div></div>
+      <div class="intro-art" aria-hidden="true"><div id="intro-dial"></div></div>
       <div class="intro-copy">
         <div class="intro-noisette" data-noisette="sleep" data-size="124"></div>
         <h1>Planque</h1>
@@ -38,8 +38,8 @@
         <h1 class="welcome">Bienvenue dans Planque</h1>
         <ul class="features">
           <li>
-            <span class="f-ico" data-icon="key"></span>
-            <div><b>Tes cachettes sont ta clé</b><p>Tu caches des noisettes dans une forêt, dans un ordre secret. Cet ordre chiffre tes fichiers.</p></div>
+            <span class="f-ico" data-icon="dial"></span>
+            <div><b>Une combinaison de coffre-fort</b><p>Tu tournes un cadran sur 4 nombres. Cette combinaison chiffre tes fichiers : 100 millions de possibilités.</p></div>
           </li>
           <li>
             <span class="f-ico" data-icon="chip"></span>
@@ -47,11 +47,11 @@
           </li>
           <li>
             <span class="f-ico" data-icon="mask"></span>
-            <div><b>Un coffre leurre</b><p>D’autres cachettes ouvrent un autre coffre, sans erreur. Si on te force à ouvrir l’appli, tu montres celui-là.</p></div>
+            <div><b>Une combinaison leurre</b><p>Une autre combinaison ouvre un autre coffre, sans erreur. Si on te force à ouvrir l’appli, tu montres celui-là.</p></div>
           </li>
           <li>
-            <span class="f-ico" data-icon="phrase"></span>
-            <div><b>Une phrase de secours</b><p>12 mots à recopier, pour retrouver ton coffre si tu oublies tes cachettes ou si tu changes d’iPhone.</p></div>
+            <span class="f-ico" data-icon="qr"></span>
+            <div><b>Une carte-clé de secours</b><p>Un QR code à imprimer, pour retrouver ton coffre si tu oublies ta combinaison ou si tu changes d’iPhone.</p></div>
           </li>
         </ul>
       </div>
@@ -59,42 +59,46 @@
       <button class="btn" data-go="create">Continuer</button>
     </section>
 
-    <!-- La forêt : création, verrouillage, confirmation, récupération -->
+    <!-- Le cadran : création, verrouillage, confirmation, récupération -->
     <section class="screen" id="secret">
-      <header class="secret-head glass">
-        <div class="secret-mascot" data-noisette="sleep" data-size="58" id="secret-mascot"></div>
+      <header class="secret-head">
+        <div class="secret-mascot" data-noisette="sleep" data-size="64" id="secret-mascot"></div>
         <div class="speech" aria-live="polite">
           <h2 id="secret-title"></h2>
           <p id="secret-sub"></p>
           <p class="reaction" id="bubble"></p>
         </div>
       </header>
-      <div id="forest"></div>
-      <footer class="secret-foot glass">
+      <div class="slots" id="slots" aria-live="polite"></div>
+      <div id="dial"></div>
+      <footer class="secret-foot">
         <div class="foot-row">
-          <div class="nuts" id="nuts" aria-label="Noisettes cachées"></div>
           <button class="text-btn" id="secret-clear">Effacer</button>
+          <button class="text-btn bio-btn" id="secret-go" hidden><span data-icon="faceid"></span>Face ID</button>
         </div>
-        <button class="btn" id="secret-go">Ouvrir</button>
         <button class="link-btn" id="secret-link"></button>
       </footer>
     </section>
 
-    <!-- Phrase de secours : affichage -->
+    <!-- Carte-clé de secours : affichage -->
     <section class="screen" id="phrase">
       <div class="scroll-body">
         <div class="phrase-head">
-          <div data-noisette="awake" data-size="84"></div>
-          <h2>Ta phrase de secours</h2>
-          <p class="sub">Recopie ces 12 mots sur papier. C’est le seul moyen de rouvrir ce coffre si tu oublies tes cachettes ou si tu changes d’iPhone.</p>
+          <h2>Ta carte-clé</h2>
+          <p class="sub">Si tu oublies ta combinaison ou si tu changes d’iPhone, c’est elle qui rouvre ce coffre. Imprime-la, ou range-la ailleurs que sur ton iPhone.</p>
         </div>
-        <ol class="paper" id="words"></ol>
-        <p class="paper-note">Elle ne s’affichera plus. Évite la capture d’écran : elle finirait dans ta pellicule, et sans doute dans iCloud.</p>
+        <img class="card-img" id="card-img" alt="Carte-clé Planque : un QR code et 12 mots de secours">
+        <ol class="paper" id="words" hidden></ol>
+        <p class="paper-note">Elle ne s’affichera plus. Pas de capture d’écran : elle finirait dans ta pellicule, et sans doute dans iCloud.</p>
       </div>
-      <button class="btn" id="phrase-done" style="margin-top:12px">Je l’ai recopiée</button>
+      <div class="actions">
+        <button class="btn" id="card-save"><span data-icon="print"></span>Imprimer ou enregistrer</button>
+        <button class="btn ghost small" id="phrase-done" disabled>C’est fait</button>
+        <button class="link-btn" id="card-words">Je préfère recopier les 12 mots</button>
+      </div>
     </section>
 
-    <!-- Phrase de secours : vérification -->
+    <!-- Carte-clé : vérification des 12 mots recopiés à la main -->
     <section class="screen" id="quiz">
       <div class="scroll-body">
         <div class="phrase-head">
@@ -110,32 +114,24 @@
       </div>
     </section>
 
-    <!-- Phrase de secours : saisie -->
+    <!-- Carte-clé : scan ou saisie des 12 mots -->
     <section class="screen" id="recover">
       <div class="scroll-body">
         <div class="phrase-head">
           <div data-noisette="awake" data-size="84"></div>
-          <h2>Phrase de secours</h2>
-          <p class="sub">Tape les 12 mots de ton coffre, dans l’ordre. Les accents et les majuscules ne comptent pas.</p>
+          <h2>Carte-clé de secours</h2>
+          <p class="sub">Scanne le QR code de ta carte-clé, ou tape ses 12 mots dans l’ordre. Les accents et les majuscules ne comptent pas.</p>
         </div>
-        <textarea class="phrase-input" id="recover-input" autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="abeille balcon …"></textarea>
+        <textarea class="phrase-input" id="recover-input" autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Les 12 mots de ta carte : abeille balcon …"></textarea>
         <div class="chips" id="recover-suggest" style="margin-top:10px"></div>
         <div class="hint" id="recover-hint"></div>
       </div>
       <div class="actions">
-        <button class="btn" id="recover-go">Retrouver mon coffre</button>
+        <button class="btn" id="recover-scan"><span data-icon="qr"></span>Scanner ma carte-clé</button>
+        <button class="btn ghost small" id="recover-go">Retrouver avec les 12 mots</button>
         <button class="btn ghost small" id="recover-file"><span data-icon="folder"></span>J’ai un fichier de sauvegarde</button>
         <button class="link-btn" id="recover-back">Retour</button>
       </div>
-    </section>
-
-    <!-- Face ID avant la forêt (optionnel) -->
-    <section class="screen" id="gate">
-      <div class="center">
-        <div data-noisette="sleep" data-size="150"></div>
-        <h2 style="margin-top:10px">Planque est verrouillée</h2>
-      </div>
-      <button class="btn" id="gate-go"><span data-icon="faceid"></span>Déverrouiller</button>
     </section>
 
     <!-- Clé introuvable (nouvel iPhone, restauration) -->
@@ -143,10 +139,10 @@
       <div class="center">
         <div data-noisette="sleep" data-size="140"></div>
         <h2 style="margin-top:8px">Cet iPhone n’a pas la clé de tes coffres</h2>
-        <p class="sub">Ta clé reste dans la puce de l’iPhone où tu as créé tes coffres. Si tu as changé d’iPhone ou restauré une sauvegarde, rouvre chaque coffre avec sa phrase de secours.</p>
+        <p class="sub">Ta clé reste dans la puce de l’iPhone où tu as créé tes coffres. Si tu as changé d’iPhone ou restauré une sauvegarde, rouvre chaque coffre avec sa carte-clé.</p>
       </div>
       <div class="actions">
-        <button class="btn" id="problem-recover">Utiliser une phrase de secours</button>
+        <button class="btn" id="problem-recover">Utiliser une carte-clé</button>
         <button class="btn ghost small" id="retry">Réessayer</button>
       </div>
     </section>

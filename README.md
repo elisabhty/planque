@@ -1,24 +1,25 @@
 # Planque
 
 Coffre-fort chiffré pour iPhone, avec **Noisette**, l'écureuil qui planque tes photos.
-Photos, vidéos et documents chiffrés en AES-256 sur l'iPhone. La clé vient des **cachettes de Noisette** (l'ordre dans lequel tu caches tes noisettes dans une forêt de 36 cachettes) et de la **puce de sécurité** de l'iPhone. Pas de compte, pas de serveur ; un parcours = un coffre (coffre leurre compris) ; une phrase de secours de 12 mots par coffre.
+Photos, vidéos et documents chiffrés en AES-256 sur l'iPhone. La clé vient de la **combinaison du cadran de coffre-fort** (4 nombres de 0 à 99) et de la **puce de sécurité** de l'iPhone. Pas de compte, pas de serveur ; une combinaison = un coffre (coffre leurre compris) ; une **carte-clé QR** de secours par coffre ; Face ID en option.
 
 > Nom et mascotte provisoires : tout se change facilement (voir plus bas).
 
 ## Ce qui est fait
 
-- **Onboarding** : bienvenue, trois choses à savoir, choix des cachettes (deux fois), phrase de secours avec vérification.
-- **La forêt** : 36 cachettes illustrées (trous du chêne, nichoir, lanterne, lune, terrier, botte…). Noisette se réveille, se penche vers chaque noisette et juge la solidité du parcours. Même réaction pour tous les parcours.
-- **Phrase de secours** : 12 mots (BIP39, liste française), pour les cachettes oubliées et les changements d'iPhone. Saisie sans accents ni majuscules, avec suggestions.
-- **Face ID** (option) avant la forêt.
-- **Ne rien perdre** : sauvegarde chiffrée en un fichier `.planque` (à ranger dans Fichiers / iCloud Drive), restauration sur n'importe quel iPhone avec la phrase de secours, « Supprimés récemment » pendant 30 jours, remise dans Photos avec les fichiers d'origine, rappel de sauvegarde.
+- **Onboarding** : bienvenue, ce qu'il faut savoir, choix de la combinaison (deux fois), carte-clé de secours.
+- **Le cadran** : molette de coffre-fort à 100 crans qu'on tourne au doigt (vibration à chaque cran), nombre courant au centre, on touche le centre pour valider. 4 nombres = 100 millions de combinaisons. Combinaisons évidentes refusées. Même réaction pour toutes les combinaisons, « clac » à l'ouverture.
+- **Frein aux essais** : attente croissante après 5 essais ratés (compteur dans le trousseau).
+- **Carte-clé de secours** : QR code + les 12 mots équivalents (BIP39, liste française), à imprimer. On la scanne (ou on tape les mots) si on oublie sa combinaison ou si on change d'iPhone.
+- **Ouvrir avec Face ID** (option) : ouvre directement le coffre où il est activé ; la combinaison reste demandée une fois par semaine.
+- **Ne rien perdre** : sauvegarde chiffrée en un fichier `.planque` (à ranger dans Fichiers / iCloud Drive), restauration sur n'importe quel iPhone avec la carte-clé, « Supprimés récemment » pendant 30 jours, remise dans Photos avec les fichiers d'origine, rappel de sauvegarde.
 - **Comme Photos** : dates de prise de vue d'origine, galerie groupée par mois, albums.
-- **Fouineurs et discrétion** : journal des dernières ouvertures du coffre, « Changer mes cachettes », verrouillage en retournant l'iPhone, icônes discrètes (Lune, Sapin).
+- **Fouineurs et discrétion** : journal des dernières ouvertures du coffre, « Changer de combinaison », verrouillage en retournant l'iPhone, icônes discrètes (Lune, Sapin).
 - **Coffre** : galerie (miniatures chiffrées, chargées à la demande), import depuis Photos, l'appareil photo (sans passer par la pellicule) et Fichiers, visionneuse photo (balayage, double-tap pour zoomer), lecture vidéo et aperçu de documents natifs, sélection multiple, partage, suppression.
 - **Après un import Photos** : proposition de supprimer les originaux de la pellicule (avec le rappel « Supprimés récemment »).
 - **Réglages du coffre** : créer un coffre leurre, explication de la protection, effacer le coffre.
 - **Sécurité** : voir [SECURITE.md](SECURITE.md).
-- **Retours haptiques** sur chaque point du schéma, l'ouverture, la sélection.
+- **Retours haptiques** à chaque cran du cadran, à chaque nombre validé, à l'ouverture, à la sélection.
 
 ## Lancer sur ton iPhone
 
@@ -49,12 +50,16 @@ www/                      Interface (HTML/CSS/JS, sans framework)
   js/app.js               Écrans, galerie, import, visionneuse, réglages
   js/noisette.js          La mascotte (3 expressions superposées, 5 états animés)
   img/noisette/           awake.webp, sleep.webp, joy.webp (fond transparent, 480 px)
-  js/forest.js            La forêt et ses 36 cachettes (⚠️ ne jamais renuméroter)
-  js/mnemonic.js          Phrase de secours (BIP39) ; js/words-fr.js : la liste de mots
+  js/dial.js              Le cadran de coffre-fort (dessin, rotation, validation des nombres)
+  js/vendor/qrcode.js     Générateur de QR code (Kazuhiko Arase, licence MIT)
+  js/mnemonic.js          Les 12 mots de la carte-clé (BIP39) ; js/words-fr.js : la liste de mots
   js/vault.js             Pont vers le plugin natif (ou la simulation)
   js/vault-web.js         Simulation pour le navigateur
 ios/App/App/
   VaultPlugin.swift       Cœur : puce de sécurité, clés, chiffrement, récupération, import, aperçus
+  Cadran.swift            Frein aux essais, Face ID, carte-clé (scan et impression)
+  SharedVaults.swift      Coffres partagés iCloud chiffrés de bout en bout (en cours : pas encore dans l'interface)
+  App.entitlements        iCloud / CloudKit, pour les coffres partagés (pas encore branché dans la compilation)
   MainViewController.swift Enregistre le plugin
 SECURITE.md               Ce que le chiffrement protège, et ses limites
 ```
@@ -68,7 +73,7 @@ L'icône, l'écran de lancement et le cache du sélecteur d'applis sont dans `io
 
 1. **Paywall** (gratuit jusqu'à un certain nombre de fichiers, puis abonnement), avec StoreKit ou RevenueCat.
 2. **Sauvegarde iCloud chiffrée** propre à Planque (CloudKit, base privée de l'utilisateur).
-3. **Partage d'un coffre** avec une personne de confiance.
+3. **Coffres partagés** (en cours) : synchro iCloud chiffrée de bout en bout, droits par invité (regarder, ou ajouter et supprimer), clé donnée par QR code. Le code iPhone est écrit (`SharedVaults.swift`) ; il reste l'interface et la simulation navigateur.
 4. **Site + guides SEO** (la méthode du post Vaultaire).
 
 > Sur le simulateur iOS (pas de puce de sécurité), la clé de l'appareil est logicielle. Teste la sécurité sur un vrai iPhone.
