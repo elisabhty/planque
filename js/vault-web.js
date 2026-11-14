@@ -123,9 +123,8 @@ export class WebVault {
   constructor() {
     this.s = null;
     this.listeners = {};
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden' && this.s) { this.s = null; this.emit('locked', {}); }
-    });
+    // Aperçu navigateur : on ne verrouille pas en quittant l'onglet, pour pouvoir explorer.
+    // (Sur iPhone, le plugin natif verrouille toujours dès que l'appli passe en arrière-plan.)
   }
   on(event, cb) { (this.listeners[event] ||= []).push(cb); return { remove: () => {} }; }
   emit(event, data) { (this.listeners[event] || []).forEach((cb) => cb(data)); }
@@ -466,6 +465,52 @@ export class WebVault {
     const raw = await crypto.subtle.exportKey('raw', s.master);
     await put(`v:${vaultId}:key`, await seal(kek, raw, `plq-key|${vaultId}`));
     return this.unlock({ nuts });
+  }
+
+  // Remplit le coffre ouvert avec des photos d'exemple (aperçu navigateur uniquement).
+  async seedDemo() {
+    const s = this.needPersisted();
+    const scenes = [
+      ['Coucher de soleil', ['#FF7E5F', '#FEB47B', '#2B1B3D'], 0], ['Plage', ['#56CCF2', '#F2E3B3', '#2F80ED'], 0],
+      ['Montagne', ['#A1C4FD', '#C2E9FB', '#3A4A5C'], 0], ['Forêt', ['#134E5E', '#71B280', '#0B2A22'], 1],
+      ['Lac', ['#2193B0', '#6DD5ED', '#1B3B4B'], 1], ['Ville de nuit', ['#0F2027', '#2C5364', '#F2C94C'], 1],
+      ['Brunch', ['#F6D365', '#FDA085', '#7A4B2A'], 2], ['Concert', ['#41295A', '#2F0743', '#FF5F6D'], 2],
+      ['Anniversaire', ['#F857A6', '#FF5858', '#FFE29F'], 2], ['Neige', ['#E6DADA', '#274046', '#FFFFFF'], 3],
+    ];
+    const draw = (c, title) => {
+      const cv = document.createElement('canvas'); cv.width = 1200; cv.height = 900;
+      const g = cv.getContext('2d');
+      const grad = g.createLinearGradient(0, 0, 0, 900); grad.addColorStop(0, c[0]); grad.addColorStop(1, c[1]);
+      g.fillStyle = grad; g.fillRect(0, 0, 1200, 900);
+      g.fillStyle = 'rgba(255,255,255,.75)'; g.beginPath(); g.arc(850, 300, 90, 0, Math.PI * 2); g.fill();
+      g.fillStyle = c[2];
+      g.beginPath(); g.moveTo(0, 900); g.lineTo(0, 620); g.lineTo(260, 430); g.lineTo(520, 640); g.lineTo(760, 470); g.lineTo(1200, 700); g.lineTo(1200, 900); g.fill();
+      g.globalAlpha = .35; g.beginPath(); g.moveTo(0, 900); g.lineTo(0, 740); g.lineTo(400, 600); g.lineTo(900, 760); g.lineTo(1200, 650); g.lineTo(1200, 900); g.fill(); g.globalAlpha = 1;
+      g.fillStyle = 'rgba(255,255,255,.92)'; g.font = '600 56px -apple-system, system-ui, sans-serif'; g.textAlign = 'center'; g.fillText(title, 600, 170);
+      return new Promise((r) => cv.toBlob(r, 'image/jpeg', 0.85));
+    };
+    const now = Date.now();
+    const files = [];
+    for (const [i, [title, colors, monthsAgo]] of scenes.entries()) {
+      const blob = await draw(colors, title);
+      files.push(new File([blob], `${title}.jpg`, { type: 'image/jpeg', lastModified: now - monthsAgo * 31 * 864e5 - i * 36e5 }));
+    }
+    files.push(new File(['Box : 3F9K-77QA-PLNQ\nCode porte : 4821\n'], 'Codes et mots de passe.txt', { type: 'text/plain', lastModified: now - 5 * 864e5 }));
+    const added = await this.ingest(files);
+    const byName = (n) => added.find((a) => a.name === n)?.id;
+    const vac = (await this.createAlbum({ name: 'Vacances' })).album;
+    const pap = (await this.createAlbum({ name: 'Papiers' })).album;
+    await this.moveToAlbum({ ids: ['Plage', 'Montagne', 'Lac'].map(byName), album: vac.id });
+    await this.moveToAlbum({ ids: [byName('Codes et mots de passe')], album: pap.id });
+    await this.remove({ ids: [byName('Neige')] });
+    s.index.opens = [now - 2 * 864e5, now - 864e5 - 3 * 36e5, now];
+    await this.saveIndex();
+    return this.unlockState();
+  }
+
+  unlockState() {
+    const s = this.s;
+    return { items: s.index.items, isNew: !s.persisted, settings: s.index.settings, albums: s.index.albums || [], opens: [...(s.index.opens || [])].reverse() };
   }
 
   async setFaceDownLock() { return {}; }

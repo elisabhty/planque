@@ -161,6 +161,9 @@ function addedText(items) {
 // Démarrage
 // ---------------------------------------------------------------------------
 const FACEID = 'plq.faceid';
+const PREVIEW_NUTS = 'plq.preview.nuts'; // aperçu navigateur uniquement : rouvrir sans repasser par la forêt
+const DEMO_NUTS = [0, 1, 2, 3, 4, 5];
+const rememberPreview = (seq) => { if (!isNative) localStorage.setItem(PREVIEW_NUTS, JSON.stringify(seq)); };
 
 async function boot() {
   $('#intro-forest').innerHTML = forestSVG();
@@ -175,6 +178,7 @@ async function boot() {
   $('#retry').addEventListener('click', boot2);
   $('#problem-recover').addEventListener('click', () => openRecover('problem'));
   $('#gate-go').addEventListener('click', gateAuth);
+  if (!isNative) { $('#demo-btn').hidden = false; $('#demo-btn').addEventListener('click', openDemo); }
   $('#lock-btn').addEventListener('click', lockNow);
   $('#settings-btn').addEventListener('click', openSettings);
   $('#select-btn').addEventListener('click', () => setSelecting(!state.selecting));
@@ -198,8 +202,39 @@ async function boot2() {
   let st = { ready: true, problem: null };
   try { st = await Vault.status(); } catch { /* on tente quand même */ }
   if (st.problem === 'keyMissing') return show('problem');
-  if (localStorage.getItem(ONBOARDED)) return showEntry();
+  if (localStorage.getItem(ONBOARDED)) {
+    // Aperçu navigateur : on rouvre directement le dernier coffre pour explorer les fonctions.
+    const saved = !isNative && localStorage.getItem(PREVIEW_NUTS);
+    if (saved) {
+      try { return openVault(await Vault.unlock({ nuts: JSON.parse(saved) })); } catch { /* on passe par la forêt */ }
+    }
+    return showEntry();
+  }
   show('intro');
+}
+
+/** Aperçu navigateur : coffre de démonstration déjà rempli (photos d'exemple, albums, corbeille). */
+async function openDemo() {
+  haptic('light');
+  const btn = $('#demo-btn');
+  btn.disabled = true;
+  btn.textContent = 'Je prépare la démo…';
+  try {
+    let res = await Vault.unlock({ nuts: DEMO_NUTS });
+    if (res.isNew) {
+      await Vault.confirmNew({ nuts: DEMO_NUTS });
+      res = await Vault.seedDemo();
+    }
+    localStorage.setItem(ONBOARDED, '1');
+    rememberPreview(DEMO_NUTS);
+    openVault(res);
+    toast('Démo : les 6 premières cachettes ouvrent ce coffre');
+  } catch {
+    toast('La démo n’a pas pu démarrer.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Voir la démo, avec des photos d’exemple';
+  }
 }
 
 /** Entrée dans l'appli : Face ID d'abord s'il est activé, puis la forêt. */
@@ -393,6 +428,7 @@ async function doUnlock(seq) {
   const started = performance.now();
   try {
     const res = await Vault.unlock({ nuts: seq });
+    rememberPreview(seq);
     const elapsed = performance.now() - started;
     if (elapsed < 700) await wait(700 - elapsed);
     haptic('success');
@@ -424,6 +460,7 @@ async function finishCreate(seq) {
       recovery = c.recovery;
     }
     localStorage.setItem(ONBOARDED, '1');
+    rememberPreview(seq);
     haptic('success');
     setNoisette(mascot, 'happy');
     await wait(600);
@@ -460,6 +497,7 @@ async function finishRecover(seq) {
   try {
     const res = await Vault.recoverFinish({ nuts: seq });
     localStorage.setItem(ONBOARDED, '1');
+    rememberPreview(seq);
     haptic('success');
     setNoisette($('#secret-mascot'), 'happy');
     await wait(500);
@@ -478,6 +516,7 @@ async function finishRekey(seq) {
   setBubble('Je change la serrure…');
   try {
     const res = await Vault.rekey({ nuts: seq });
+    rememberPreview(seq);
     haptic('success');
     setNoisette($('#secret-mascot'), 'happy');
     await wait(500);
