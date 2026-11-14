@@ -9,6 +9,7 @@ const METHODS = ['status', 'unlock', 'confirmNew', 'lock', 'uncover', 'thumbs', 
   'recoverStart', 'recoverFinish', 'newRecovery', 'biometry', 'authenticate',
   'restore', 'createAlbum', 'renameAlbum', 'deleteAlbum', 'moveToAlbum', 'exportToPhotos',
   'exportBackup', 'importBackup', 'setFaceDownLock', 'setIcon', 'getIcon', 'rekey'];
+// seedDemo : aperçu navigateur uniquement (simulation).
 
 function nativeVault() {
   const api = {};
